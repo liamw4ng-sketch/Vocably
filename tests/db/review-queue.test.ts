@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
 import { setNewCardsPerDay } from "@/db/repository/settings";
-import { getDueQueue, formatearPlazo } from "@/db/repository/review";
+import { getDueQueue, formatearPlazo, applyAnswer } from "@/db/repository/review";
 import { cardStates } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -173,10 +173,15 @@ describe("getDueQueue", () => {
     expect(carta.plazos[4]).toBe("8 días");
   });
 
-  // La prueba de reanudación ("una tarjeta ya respondida hoy no vuelve a la
-  // cola al recargar") depende de `applyAnswer`, que no existe hasta la
-  // tarea 4. Se añade allí, junto con su implementación, para que este
-  // archivo no quede con una prueba fallando por código que aún no existe.
+  it("una tarjeta ya respondida hoy no vuelve a la cola al recargar", async () => {
+    await saveExtraction(db, { ...base, items: [termino(1), termino(2)] });
+    expect(await getDueQueue(db, { now: AHORA })).toHaveLength(2);
+
+    await applyAnswer(db, { answerId: "r1", termId: 1, rating: 3, now: AHORA });
+
+    const cola = await getDueQueue(db, { now: AHORA });
+    expect(cola.map((c) => c.termId)).toEqual([2]);
+  });
 });
 
 describe("formatearPlazo", () => {

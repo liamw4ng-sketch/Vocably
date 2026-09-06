@@ -1,9 +1,9 @@
 import { and, eq, asc, type SQL } from "drizzle-orm";
-import { terms, termOccurrences, cardStates, sources } from "@/db/schema";
+import { terms, termOccurrences, cardStates, sources, reviewLogs } from "@/db/schema";
 import { getNewCardsPerDay } from "@/db/repository/settings";
 import type { Database } from "@/db/types";
-import { State, fsrs } from "ts-fsrs";
-import { toFsrsCard } from "@/lib/fsrs";
+import { State, fsrs, type Grade } from "ts-fsrs";
+import { toFsrsCard, fromFsrsCard } from "@/lib/fsrs";
 
 const programador = fsrs();
 
@@ -121,4 +121,66 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Car
 
   const tope = await getNewCardsPerDay(db);
   return [...vencidas, ...nuevas.slice(0, tope)];
+}
+
+export type EntradaRespuesta = {
+  answerId: string;
+  termId: number;
+  rating: 1 | 2 | 3 | 4;
+  now: Date;
+};
+
+/**
+ * Aplica una valoración. El identificador la hace idempotente: si esa misma
+ * respuesta ya se registró, no se vuelve a aplicar. Sin esto, un reintento
+ * mandaría la tarjeta a una fecha equivocada sin dar ningún error visible.
+ */
+export async function applyAnswer(
+  db: Database,
+  entrada: EntradaRespuesta,
+): Promise<{ aplicada: boolean; proximaFecha: Date }> {
+  return db.transaction(async (tx) => {
+    const yaRegistrada = await tx
+      .select({ id: reviewLogs.id })
+      .from(reviewLogs)
+      .where(eq(reviewLogs.answerId, entrada.answerId))
+      .limit(1);
+
+    const [fila] = await tx
+      .select()
+      .from(cardStates)
+      .where(eq(cardStates.termId, entrada.termId))
+      .limit(1);
+
+    if (!fila) {
+      throw new Error(`No existe ninguna tarjeta para el término ${entrada.termId}.`);
+    }
+
+    if (yaRegistrada.length > 0) {
+      return { aplicada: false, proximaFecha: fila.due };
+    }
+
+    const { card } = programador.next(
+      toFsrsCard(fila),
+      entrada.now,
+      entrada.rating as Grade,
+    );
+
+    await tx
+      .update(cardStates)
+      .set(fromFsrsCard(card))
+      .where(eq(cardStates.termId, entrada.termId));
+
+    await tx.insert(reviewLogs).values({
+      answerId: entrada.answerId,
+      termId: entrada.termId,
+      rating: entrada.rating,
+      state: fila.state,
+      stability: fila.stability,
+      difficulty: fila.difficulty,
+      reviewedAt: entrada.now,
+    });
+
+    return { aplicada: true, proximaFecha: card.due };
+  });
 }
