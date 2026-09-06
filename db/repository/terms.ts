@@ -1,6 +1,7 @@
 import { and, eq, ilike, or, type SQL } from "drizzle-orm";
 import { terms, termOccurrences } from "@/db/schema";
 import type { Database } from "@/db/types";
+import { normalizeTerm } from "@/lib/normalize";
 
 export type TermRow = {
   id: number;
@@ -63,10 +64,16 @@ export async function updateTerm(
   id: number,
   fields: { term?: string; translation?: string; type?: string; level?: string },
 ): Promise<void> {
-  await db
-    .update(terms)
-    .set({ ...fields, updatedAt: new Date() })
-    .where(eq(terms.id, id));
+  // El término normalizado es la clave de deduplicación que usa saveExtraction
+  // (ver db/repository/extraction.ts). Si no se recalcula al editar `term`,
+  // una extracción futura con la forma corregida no encontrará este término
+  // y creará uno duplicado en vez de fusionarse con él.
+  const values: Partial<typeof terms.$inferInsert> = { ...fields, updatedAt: new Date() };
+  if (fields.term !== undefined) {
+    values.termNormalized = normalizeTerm(fields.term);
+  }
+
+  await db.update(terms).set(values).where(eq(terms.id, id));
 }
 
 /** Borra el término; la tarjeta y las apariciones caen con él por clave foránea. */

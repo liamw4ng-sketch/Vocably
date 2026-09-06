@@ -3,18 +3,30 @@
 import { useEffect, useState } from "react";
 import type { TermRow } from "@/db/repository/terms";
 
+type Status = "loading" | "loaded" | "error";
+
 export function TermTable() {
   const [rows, setRows] = useState<TermRow[]>([]);
   const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<Status>("loading");
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      const query = search ? `?search=${encodeURIComponent(search)}` : "";
-      const response = await fetch(`/api/terms${query}`);
-      const body = (await response.json()) as { terms: TermRow[] };
-      if (!cancelled) setRows(body.terms);
+      if (!cancelled) setStatus("loading");
+      try {
+        const query = search ? `?search=${encodeURIComponent(search)}` : "";
+        const response = await fetch(`/api/terms${query}`);
+        if (!response.ok) throw new Error(`respuesta ${response.status}`);
+        const body = (await response.json()) as { terms: TermRow[] };
+        if (!cancelled) {
+          setRows(body.terms);
+          setStatus("loaded");
+        }
+      } catch {
+        if (!cancelled) setStatus("error");
+      }
     }
 
     void load();
@@ -44,29 +56,39 @@ export function TermTable() {
         placeholder="Buscar"
         className="rounded border p-3"
       />
-      <ul className="flex flex-col gap-3">
-        {rows.map((row) => (
-          <li key={row.id} className="rounded border p-3">
-            <div className="flex items-baseline justify-between gap-3">
-              <strong>{row.term}</strong>
-              <button onClick={() => void remove(row.id)} className="text-sm text-red-600">
-                Borrar
-              </button>
-            </div>
-            <input
-              defaultValue={row.translation}
-              onBlur={(event) => void save(row.id, { translation: event.target.value })}
-              className="mt-2 w-full rounded border p-2"
-            />
-            {row.contexts.map((context, index) => (
-              <p key={index} className="mt-2 text-sm italic text-gray-600">
-                {context}
-              </p>
+      {status === "loading" && <p>Cargando vocabulario…</p>}
+      {status === "error" && (
+        <p className="text-red-600">
+          No se pudo cargar el vocabulario. Inténtalo de nuevo más tarde.
+        </p>
+      )}
+      {status === "loaded" && (
+        <>
+          <ul className="flex flex-col gap-3">
+            {rows.map((row) => (
+              <li key={row.id} className="rounded border p-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <strong>{row.term}</strong>
+                  <button onClick={() => void remove(row.id)} className="text-sm text-red-600">
+                    Borrar
+                  </button>
+                </div>
+                <input
+                  defaultValue={row.translation}
+                  onBlur={(event) => void save(row.id, { translation: event.target.value })}
+                  className="mt-2 w-full rounded border p-2"
+                />
+                {row.contexts.map((context, index) => (
+                  <p key={index} className="mt-2 text-sm italic text-gray-600">
+                    {context}
+                  </p>
+                ))}
+              </li>
             ))}
-          </li>
-        ))}
-      </ul>
-      {rows.length === 0 && <p>Todavía no hay vocabulario guardado.</p>}
+          </ul>
+          {rows.length === 0 && <p>Todavía no hay vocabulario guardado.</p>}
+        </>
+      )}
     </div>
   );
 }

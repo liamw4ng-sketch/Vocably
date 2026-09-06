@@ -76,6 +76,31 @@ describe("updateTerm", () => {
     expect(after.translation).toBe("remiso");
     expect(await db.select().from(cardStates)).toEqual(before);
   });
+
+  it("recalcula la clave de deduplicación al corregir el término, para que una futura extracción se fusione con él en vez de duplicarlo", async () => {
+    const [row] = await listTerms(db, { type: "phrasal_verb" });
+    expect(row.term).toBe("come across");
+
+    await updateTerm(db, row.id, { term: "come across sth" });
+
+    const result = await saveExtraction(db, {
+      ...base,
+      level: "B2",
+      items: [
+        {
+          term: "Come Across STH",
+          type: "phrasal_verb",
+          translation: "encontrarse con algo",
+          context: "New context.",
+          example: "New example.",
+        },
+      ],
+    });
+
+    expect(result.created).toBe(0);
+    expect(result.merged).toBe(1);
+    expect(await listTerms(db, {})).toHaveLength(2);
+  });
 });
 
 describe("deleteTerm", () => {
