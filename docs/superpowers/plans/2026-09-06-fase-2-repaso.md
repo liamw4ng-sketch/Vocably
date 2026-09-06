@@ -40,8 +40,11 @@ f.repeat(card, now);                   // -> { 1: {card,log}, 2: ..., 3: ..., 4:
 - `Rating`: `Again = 1`, `Hard = 2`, `Good = 3`, `Easy = 4` (y `Manual = 0`, sin usar aquí).
 - `State`: `New = 0`, `Learning = 1`, `Review = 2`, `Relearning = 3`.
 - Una `Card` tiene exactamente: `due`, `stability`, `difficulty`, `elapsed_days`,
-  `scheduled_days`, `reps`, `lapses`, **`learning_steps`**, `state`, y `last_review`
-  (ausente en una tarjeta nueva). `due` y `last_review` son objetos `Date`.
+  `scheduled_days`, `reps`, `lapses`, **`learning_steps`**, `state`, y `last_review`.
+  **Corrección (2026-09-07):** el plan decía que `last_review` estaba *ausente* en una
+  tarjeta nueva. Es falso, comprobado ejecutando `createEmptyCard`: la clave existe
+  siempre, con valor `undefined`. `Object.keys` la devuelve. Usa `=== undefined`, nunca
+  `in` ni `hasOwnProperty`. `due` es un objeto `Date`; `last_review` lo es cuando existe.
 - **`learning_steps` NO existe en `card_states`.** Hay que añadirla (tarea 2).
 - Plazos reales de una tarjeta nueva: Again +1 min, Hard +6 min, Good +10 min,
   Easy +8 días. De una madura (stability 120): Again mismo día, Hard +230 días,
