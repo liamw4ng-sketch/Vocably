@@ -816,7 +816,7 @@ export function buildExtractionPrompt(
 - [ ] **Step 5: Ejecutar las pruebas y comprobar que pasan**
 
 Run: `npm test -- tests/extraction-schema.test.ts tests/prompt.test.ts`
-Expected: PASS, 9 pruebas.
+Expected: PASS, 11 pruebas (5 de `extractionSchema`, 2 de `isCefrLevel`, 4 del prompt).
 
 - [ ] **Step 6: Commit**
 
