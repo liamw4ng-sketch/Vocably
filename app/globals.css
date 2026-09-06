@@ -1,26 +1,75 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Color — tema claro */
+  --fondo: #FBF7F1;
+  --superficie: #FFFFFF;
+  --texto: #191512;
+  --texto-suave: #6B6259;
+  --borde: #E5DCD1;
+  --acento: #E1552C;
+
+  /* Botones de valoración: mismo color en ambos temas, el texto siempre blanco */
+  --valoracion-otra-vez: #D6402F;
+  --valoracion-dificil: #C77A16;
+  --valoracion-bien: #3E9D62;
+  --valoracion-facil: #3B7FA6;
+
+  /* Escala tipográfica: 0.875 / 1 / 1.25 / 1.5 / 2 / 2.5 / 3 rem */
+  --tamano-1: 0.875rem;
+  --tamano-2: 1rem;
+  --tamano-3: 1.25rem;
+  --tamano-4: 1.5rem;
+  --tamano-5: 2rem;
+  --tamano-6: 2.5rem;
+  --tamano-7: 3rem;
+
+  /* Espaciado: 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 px */
+  --espacio-1: 4px;
+  --espacio-2: 8px;
+  --espacio-3: 12px;
+  --espacio-4: 16px;
+  --espacio-5: 24px;
+  --espacio-6: 32px;
+  --espacio-7: 48px;
+  --espacio-8: 64px;
+
+  /* Radios */
+  --radio-tarjeta: 16px;
+  --radio-control: 12px;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-fondo: var(--fondo);
+  --color-superficie: var(--superficie);
+  --color-texto: var(--texto);
+  --color-texto-suave: var(--texto-suave);
+  --color-borde: var(--borde);
+  --color-acento: var(--acento);
+  --color-valoracion-otra-vez: var(--valoracion-otra-vez);
+  --color-valoracion-dificil: var(--valoracion-dificil);
+  --color-valoracion-bien: var(--valoracion-bien);
+  --color-valoracion-facil: var(--valoracion-facil);
+  --radius-tarjeta: var(--radio-tarjeta);
+  --radius-control: var(--radio-control);
+  --font-serif: var(--fuente-serif);
+  --font-ui: var(--fuente-ui);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --fondo: #141210;
+    --superficie: #1E1B18;
+    --texto: #F3EDE5;
+    --texto-suave: #A79C90;
+    --borde: #332E29;
+    --acento: #FF7A4D;
   }
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100%;
+  background: var(--fondo);
+  color: var(--texto);
+  font-family: var(--fuente-ui);
 }
