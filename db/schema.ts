@@ -61,19 +61,34 @@ export const cardStates = pgTable("card_states", {
   scheduledDays: integer("scheduled_days").notNull().default(0),
   reps: integer("reps").notNull().default(0),
   lapses: integer("lapses").notNull().default(0),
+  learningSteps: integer("learning_steps").notNull().default(0),
   state: integer("state").notNull().default(0),
   lastReview: timestamp("last_review"),
 });
 
 /** Histórico de respuestas. Vacío en la fase 1; se crea para no perder datos después. */
-export const reviewLogs = pgTable("review_logs", {
-  id: serial("id").primaryKey(),
-  termId: integer("term_id")
-    .notNull()
-    .references(() => terms.id, { onDelete: "cascade" }),
-  rating: integer("rating").notNull(),
-  state: integer("state").notNull(),
-  stability: doublePrecision("stability").notNull(),
-  difficulty: doublePrecision("difficulty").notNull(),
-  reviewedAt: timestamp("reviewed_at").notNull().defaultNow(),
+export const reviewLogs = pgTable(
+  "review_logs",
+  {
+    id: serial("id").primaryKey(),
+    termId: integer("term_id")
+      .notNull()
+      .references(() => terms.id, { onDelete: "cascade" }),
+    rating: integer("rating").notNull(),
+    state: integer("state").notNull(),
+    stability: doublePrecision("stability").notNull(),
+    difficulty: doublePrecision("difficulty").notNull(),
+    reviewedAt: timestamp("reviewed_at").notNull().defaultNow(),
+    /** Id de idempotencia enviado por el cliente: repetir una respuesta no duplica el log. */
+    answerId: text("answer_id").notNull(),
+  },
+  (table) => ({
+    answerIdIdx: uniqueIndex("review_logs_answer_id_idx").on(table.answerId),
+  }),
+);
+
+/** Ajustes de la app, tabla de una sola fila. */
+export const settings = pgTable("settings", {
+  id: integer("id").primaryKey().default(1),
+  newCardsPerDay: integer("new_cards_per_day").notNull().default(20),
 });
