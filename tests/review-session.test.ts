@@ -76,12 +76,42 @@ describe("sesión de repaso", () => {
     await s.pendientes();
 
     expect(s.cartaActual()).toBeNull();
-    expect(s.resumen()).toEqual({ total: 2, otraVez: 1, dificil: 0, bien: 1, facil: 0 });
+    expect(s.resumen()).toEqual({ total: 2, otraVez: 1, dificil: 0, bien: 1, facil: 0, noGuardadas: 0 });
   });
 
   it("con una cola vacía termina de inmediato", () => {
     const s = crearSesion([], { enviar: ok });
     expect(s.cartaActual()).toBeNull();
     expect(s.progreso()).toEqual({ hechas: 0, total: 0 });
+  });
+
+  it("registra como fallida una respuesta que agota los reintentos", async () => {
+    const enviar = vi.fn().mockRejectedValue(new Error("red"));
+    const s = crearSesion(cartas, { enviar, reintentoMs: 0 });
+    s.responder(3);
+    await s.pendientes();
+
+    expect(s.fallidas()).toEqual([1]);
+    expect(s.resumen().noGuardadas).toBe(1);
+  });
+
+  it("no registra ninguna fallida cuando el envío tiene éxito", async () => {
+    const s = crearSesion(cartas, { enviar: ok });
+    s.responder(3);
+    await s.pendientes();
+
+    expect(s.fallidas()).toEqual([]);
+    expect(s.resumen().noGuardadas).toBe(0);
+  });
+
+  it("acumula varias fallidas si más de una respuesta agota los reintentos", async () => {
+    const enviar = vi.fn().mockRejectedValue(new Error("red"));
+    const s = crearSesion(cartas, { enviar, reintentoMs: 0 });
+    s.responder(3);
+    s.responder(2);
+    await s.pendientes();
+
+    expect(new Set(s.fallidas())).toEqual(new Set([1, 2]));
+    expect(s.resumen().noGuardadas).toBe(2);
   });
 });

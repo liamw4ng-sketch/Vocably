@@ -14,6 +14,8 @@ export type Resumen = {
   dificil: number;
   bien: number;
   facil: number;
+  /** Cuántas respuestas nunca llegaron al servidor tras agotar los reintentos. */
+  noGuardadas: number;
 };
 
 export type Sesion = {
@@ -23,6 +25,8 @@ export type Sesion = {
   /** Promesa que se resuelve cuando no queda ningún envío en vuelo. */
   pendientes: () => Promise<void>;
   resumen: () => Resumen;
+  /** termIds cuyas respuestas nunca se guardaron: agotaron los reintentos. */
+  fallidas: () => number[];
 };
 
 export type OpcionesSesion = {
@@ -32,6 +36,11 @@ export type OpcionesSesion = {
   generarId?: () => string;
 };
 
+/** Número total de intentos de envío antes de darse por vencido (1 inicial + 4 reintentos). */
+const MAX_INTENTOS = 5;
+/** Espera entre reintentos por defecto, en milisegundos. */
+const REINTENTO_MS_POR_DEFECTO = 1000;
+
 /**
  * La pantalla avanza en cuanto se pulsa un botón; el envío viaja aparte y se
  * reintenta con el MISMO identificador, que es lo que hace que un reintento no
@@ -40,11 +49,12 @@ export type OpcionesSesion = {
 export function crearSesion(cartas: CartaCola[], opts: OpcionesSesion): Sesion {
   const generarId =
     opts.generarId ?? (() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  const reintentoMs = opts.reintentoMs ?? 1000;
+  const reintentoMs = opts.reintentoMs ?? REINTENTO_MS_POR_DEFECTO;
 
   let indice = 0;
-  const conteo: Resumen = { total: 0, otraVez: 0, dificil: 0, bien: 0, facil: 0 };
+  const conteo = { total: 0, otraVez: 0, dificil: 0, bien: 0, facil: 0 };
   const enVuelo = new Set<Promise<void>>();
+  const fallidas: number[] = [];
 
   async function enviarConReintento(envio: EnvioRespuesta): Promise<void> {
     for (let intento = 0; ; intento += 1) {
@@ -52,7 +62,10 @@ export function crearSesion(cartas: CartaCola[], opts: OpcionesSesion): Sesion {
         await opts.enviar(envio);
         return;
       } catch {
-        if (intento >= 4) return; // se abandona tras cinco intentos
+        if (intento >= MAX_INTENTOS - 1) {
+          fallidas.push(envio.termId); // se abandona tras agotar los intentos
+          return;
+        }
         await new Promise((r) => setTimeout(r, reintentoMs));
       }
     }
@@ -87,6 +100,8 @@ export function crearSesion(cartas: CartaCola[], opts: OpcionesSesion): Sesion {
       while (enVuelo.size > 0) await Promise.all([...enVuelo]);
     },
 
-    resumen: () => ({ ...conteo }),
+    resumen: () => ({ ...conteo, noGuardadas: fallidas.length }),
+
+    fallidas: () => [...fallidas],
   };
 }
