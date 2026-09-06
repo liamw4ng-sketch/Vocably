@@ -112,6 +112,12 @@ Cada extracción muestra en la interfaz su coste real, calculado a partir de
 los tokens que ha consumido esa llamada. El modelo es `claude-opus-5`: 5 $ por
 millón de tokens de entrada y 25 $ por millón de tokens de salida.
 
+**Medición real** (primera extracción contra un PDF propio, 2026-09-06): 26
+términos por unos 0,07 €, es decir alrededor de 0,003 € por término. Mil
+términos en la biblioteca costarían menos de 3 €. El diseño estimaba entre 15 y
+30 céntimos por 7-8 páginas; la realidad ha salido aproximadamente la mitad de
+cara.
+
 ## Prueba de aceptación
 
 La fase 1 no se considera terminada hasta comprobar, contra el despliegue real
