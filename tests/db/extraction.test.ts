@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createTestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
-import { terms, termOccurrences, cardStates } from "@/db/schema";
+import { sources, terms, termOccurrences, cardStates } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 const base = {
@@ -97,6 +97,45 @@ describe("saveExtraction", () => {
     expect(result.created).toBe(1);
     expect(result.merged).toBe(1);
     expect(await db.select().from(termOccurrences)).toHaveLength(2);
+    await close();
+  });
+
+  it("no deja nada a medias: si un término falla, se deshace el lote entero", async () => {
+    const { db, close } = await createTestDb();
+
+    // El segundo término revienta al insertar su aparición (context es NOT NULL),
+    // cuando el primero ya ha creado fuente, término, tarjeta y aparición. Esta
+    // es la propiedad que hace seguro guardar cada lote en cuanto responde: o
+    // entra entero, o no entra nada.
+    const roto = { ...comeAcross, term: "bring up", context: null as unknown as string };
+
+    await expect(
+      saveExtraction(db, { ...base, items: [comeAcross, roto] }),
+    ).rejects.toThrow();
+
+    expect(await db.select().from(sources)).toHaveLength(0);
+    expect(await db.select().from(terms)).toHaveLength(0);
+    expect(await db.select().from(termOccurrences)).toHaveLength(0);
+    expect(await db.select().from(cardStates)).toHaveLength(0);
+    await close();
+  });
+
+  it("un lote que falla no se lleva por delante lo ya guardado antes", async () => {
+    const { db, close } = await createTestDb();
+    await saveExtraction(db, { ...base, items: [comeAcross] });
+
+    await expect(
+      saveExtraction(db, {
+        ...base,
+        title: "Otro libro",
+        items: [{ ...comeAcross, term: "bring up", context: null as unknown as string }],
+      }),
+    ).rejects.toThrow();
+
+    expect(await db.select().from(sources)).toHaveLength(1);
+    expect(await db.select().from(terms)).toHaveLength(1);
+    expect(await db.select().from(termOccurrences)).toHaveLength(1);
+    expect(await db.select().from(cardStates)).toHaveLength(1);
     await close();
   });
 

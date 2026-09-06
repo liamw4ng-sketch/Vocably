@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
 import { listTerms, updateTerm, deleteTerm } from "@/db/repository/terms";
 import { cardStates, termOccurrences } from "@/db/schema";
 
 let db: TestDb;
+let closeDb: () => Promise<void>;
 
 const base = {
   title: "Libro",
@@ -16,7 +17,7 @@ const base = {
 };
 
 beforeEach(async () => {
-  db = (await createTestDb()).db;
+  ({ db, close: closeDb } = await createTestDb());
   await saveExtraction(db, {
     ...base,
     level: "B2",
@@ -37,6 +38,11 @@ beforeEach(async () => {
       },
     ],
   });
+});
+
+// Sin esto, cada prueba deja viva una instancia de PGlite.
+afterEach(async () => {
+  await closeDb();
 });
 
 describe("listTerms", () => {
@@ -63,6 +69,56 @@ describe("listTerms", () => {
     const rows = await listTerms(db, { search: "RELUCT" });
     expect(rows).toHaveLength(1);
     expect(rows[0].term).toBe("reluctant");
+  });
+});
+
+describe("listTerms con más de una fuente", () => {
+  beforeEach(async () => {
+    await saveExtraction(db, {
+      ...base,
+      title: "Otro libro",
+      level: "C1",
+      items: [
+        {
+          term: "cumbersome",
+          type: "word",
+          translation: "engorroso",
+          context: "A cumbersome process.",
+          example: "The form was cumbersome.",
+        },
+        // El mismo término en otra fuente: una aparición más, no un término más.
+        {
+          term: "reluctant",
+          type: "word",
+          translation: "reacio",
+          context: "She was reluctant again.",
+          example: "Still reluctant to sign.",
+        },
+      ],
+    });
+  });
+
+  it("devuelve los títulos de las fuentes de cada término, sin repetirlos", async () => {
+    const rows = await listTerms(db, {});
+    const reluctant = rows.find((r) => r.term === "reluctant")!;
+
+    expect([...reluctant.sources].sort()).toEqual(["Libro", "Otro libro"]);
+    expect(rows.find((r) => r.term === "come across")!.sources).toEqual(["Libro"]);
+  });
+
+  it("filtra por fuente", async () => {
+    const rows = await listTerms(db, { source: "Otro libro" });
+    expect(rows.map((r) => r.term).sort()).toEqual(["cumbersome", "reluctant"]);
+  });
+
+  it("no devuelve nada de una fuente que no existe", async () => {
+    expect(await listTerms(db, { source: "Un libro que no está" })).toHaveLength(0);
+  });
+
+  it("combina el filtro de fuente con el de tipo", async () => {
+    const rows = await listTerms(db, { source: "Libro", type: "phrasal_verb" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].term).toBe("come across");
   });
 });
 

@@ -15,8 +15,13 @@ type Body = {
 };
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as Body;
-  const { pdfBase64, title, pageStart, pageEnd, level } = body;
+  let body: Body | null;
+  try {
+    body = (await request.json()) as Body | null;
+  } catch {
+    return NextResponse.json({ error: "El cuerpo de la petición no es JSON válido." }, { status: 400 });
+  }
+  const { pdfBase64, title, pageStart, pageEnd, level } = body ?? {};
 
   if (!pdfBase64) {
     return NextResponse.json({ error: "Falta el PDF." }, { status: 400 });
@@ -52,16 +57,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const saved = await saveExtraction(getDb(), {
-    title: title.trim(),
-    pageStart: pageStart as number,
-    pageEnd: pageEnd as number,
-    level,
-    inputTokens: outcome.inputTokens,
-    outputTokens: outcome.outputTokens,
-    costUsd: outcome.costUsd,
-    items: outcome.items,
-  });
+  // La extracción ya está pagada. Si el guardado falla, hay que decirlo con
+  // esas palabras: el dinero se ha gastado y los términos se han perdido.
+  let saved;
+  try {
+    saved = await saveExtraction(getDb(), {
+      title: title.trim(),
+      pageStart: pageStart as number,
+      pageEnd: pageEnd as number,
+      level,
+      inputTokens: outcome.inputTokens,
+      outputTokens: outcome.outputTokens,
+      costUsd: outcome.costUsd,
+      items: outcome.items,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "error desconocido";
+    return NextResponse.json(
+      {
+        error:
+          "El vocabulario se extrajo bien, pero no se pudo guardar en la base de datos, " +
+          `así que estas páginas se han cobrado sin guardarse nada: ${detail}`,
+      },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json({
     items: outcome.items,

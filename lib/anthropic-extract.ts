@@ -23,6 +23,11 @@ export async function extractTermsFromPdf(params: {
   const response = await client.messages.parse({
     model: "claude-opus-5",
     max_tokens: 16000,
+    // Explícito a propósito: en claude-opus-5 el pensamiento adaptativo ya es
+    // el comportamiento por defecto, pero no lo es en otros modelos, y el
+    // diseño (§5) lo pide. Así cambiar de modelo no cambia la extracción sin
+    // que nadie se entere.
+    thinking: { type: "adaptive" },
     messages: [
       {
         role: "user",

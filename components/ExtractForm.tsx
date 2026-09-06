@@ -126,11 +126,19 @@ export function ExtractForm() {
             Coste de esta extracción: {summary.costUsd.toFixed(3)} $
           </p>
           {summary.failed.length > 0 && (
-            <p className="mt-2 text-red-600">
-              Fallaron las páginas{" "}
-              {summary.failed.map((f) => `${f.pageStart}-${f.pageEnd}`).join(", ")}. Vuelve a
-              lanzar solo ese rango.
-            </p>
+            <div className="mt-2 text-red-600">
+              <p>Fallaron estos lotes. Vuelve a lanzar solo ese rango:</p>
+              <ul className="mt-1 flex flex-col gap-1 text-sm">
+                {summary.failed.map((failure) => (
+                  <li key={`${failure.pageStart}-${failure.pageEnd}`}>
+                    <strong>
+                      Páginas {failure.pageStart}-{failure.pageEnd}:
+                    </strong>{" "}
+                    {failure.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}

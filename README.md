@@ -55,6 +55,13 @@ está definido.
 
 `.env.local` está en `.gitignore`; nunca debe llegar a un commit.
 
+La comprobación de `APP_PASSWORD` al entrar es una comparación normal de
+cadenas (`!==`), que no es de tiempo constante, y no hay ningún límite de
+intentos: nada impide probar contraseñas una detrás de otra. Para una app de un
+solo usuario se acepta a cambio de no añadir estado ni dependencias, pero
+obliga a que `APP_PASSWORD` sea **larga y aleatoria** (por ejemplo, la salida de
+`openssl rand -hex 24`), no una contraseña adivinable.
+
 ## Pruebas
 
 ```bash

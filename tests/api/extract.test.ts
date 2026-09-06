@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fixture from "@/tests/fixtures/extraction-response.json";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { terms } from "@/db/schema";
@@ -7,6 +7,7 @@ import { terms } from "@/db/schema";
 // así que la referencia a extractTermsFromPdf debe elevarse con él.
 const extractTermsFromPdf = vi.hoisted(() => vi.fn());
 let testDb: TestDb;
+let closeDb: () => Promise<void>;
 
 vi.mock("@/lib/anthropic-extract", () => ({ extractTermsFromPdf }));
 vi.mock("@/db/client", () => ({ getDb: () => testDb }));
@@ -32,7 +33,12 @@ const validBody = {
 describe("POST /api/extract", () => {
   beforeEach(async () => {
     extractTermsFromPdf.mockReset();
-    testDb = (await createTestDb()).db;
+    ({ db: testDb, close: closeDb } = await createTestDb());
+  });
+
+  // Sin esto, cada prueba deja viva una instancia de PGlite.
+  afterEach(async () => {
+    await closeDb();
   });
 
   it("extrae y guarda los términos del lote", async () => {
@@ -87,5 +93,41 @@ describe("POST /api/extract", () => {
     const response = await POST(request(validBody));
     expect(response.status).toBe(200);
     expect((await response.json()).created).toBe(0);
+  });
+
+  it("explica que la extracción se cobró pero no se guardó, en vez de reventar con un 500 crudo", async () => {
+    extractTermsFromPdf.mockResolvedValue({
+      items: fixture.terms,
+      inputTokens: 20_000,
+      outputTokens: 4_000,
+      costUsd: 0.2,
+    });
+    // La base de datos deja de responder justo después de la llamada a Claude,
+    // que ya está pagada.
+    testDb = {
+      transaction: () => Promise.reject(new Error("connection terminated unexpectedly")),
+    } as unknown as TestDb;
+
+    const response = await POST(request(validBody));
+    const { error } = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(error).toMatch(/se extrajo bien/i);
+    expect(error).toMatch(/no se pudo guardar/i);
+    expect(error).toMatch(/connection terminated/);
+  });
+
+  it("devuelve 400, y no un 500, si el cuerpo no es JSON válido", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{esto no es json",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/no es json válido/i);
+    expect(extractTermsFromPdf).not.toHaveBeenCalled();
   });
 });

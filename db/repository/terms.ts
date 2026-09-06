@@ -1,5 +1,5 @@
 import { and, eq, ilike, or, type SQL } from "drizzle-orm";
-import { terms, termOccurrences } from "@/db/schema";
+import { sources, terms, termOccurrences } from "@/db/schema";
 import type { Database } from "@/db/types";
 import { normalizeTerm } from "@/lib/normalize";
 
@@ -11,15 +11,24 @@ export type TermRow = {
   level: string;
   contexts: string[];
   examples: string[];
+  /** Títulos de las fuentes en las que ha aparecido el término, sin repetir. */
+  sources: string[];
 };
 
-export async function listTerms(
-  db: Database,
-  filters: { level?: string; type?: string; search?: string },
-): Promise<TermRow[]> {
+export type TermFilters = {
+  level?: string;
+  type?: string;
+  /** Título de la fuente. Se filtra por título y no por id porque el mismo
+   *  libro extraído dos veces son dos fuentes distintas para el usuario. */
+  source?: string;
+  search?: string;
+};
+
+export async function listTerms(db: Database, filters: TermFilters): Promise<TermRow[]> {
   const conditions: SQL[] = [];
   if (filters.level) conditions.push(eq(terms.level, filters.level));
   if (filters.type) conditions.push(eq(terms.type, filters.type));
+  if (filters.source) conditions.push(eq(sources.title, filters.source));
   if (filters.search) {
     const pattern = `%${filters.search}%`;
     conditions.push(
@@ -36,9 +45,11 @@ export async function listTerms(
       level: terms.level,
       context: termOccurrences.context,
       example: termOccurrences.example,
+      source: sources.title,
     })
     .from(terms)
     .leftJoin(termOccurrences, eq(termOccurrences.termId, terms.id))
+    .leftJoin(sources, eq(sources.id, termOccurrences.sourceId))
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
   const byId = new Map<number, TermRow>();
@@ -51,9 +62,11 @@ export async function listTerms(
       level: row.level,
       contexts: [],
       examples: [],
+      sources: [],
     };
     if (row.context) current.contexts.push(row.context);
     if (row.example) current.examples.push(row.example);
+    if (row.source && !current.sources.includes(row.source)) current.sources.push(row.source);
     byId.set(row.id, current);
   }
   return [...byId.values()];

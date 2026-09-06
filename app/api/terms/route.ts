@@ -7,6 +7,7 @@ export async function GET(request: Request) {
   const rows = await listTerms(getDb(), {
     level: url.searchParams.get("level") ?? undefined,
     type: url.searchParams.get("type") ?? undefined,
+    source: url.searchParams.get("source") ?? undefined,
     search: url.searchParams.get("search") ?? undefined,
   });
   return NextResponse.json({ terms: rows });

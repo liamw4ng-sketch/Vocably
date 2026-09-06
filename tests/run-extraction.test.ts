@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { runExtraction } from "@/lib/run-extraction";
+import {
+  assertBatchFits,
+  runExtraction,
+  MAX_BATCH_BYTES,
+  type PostBatchBody,
+} from "@/lib/run-extraction";
 
 async function makePdfBytes(pages: number): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -109,5 +114,95 @@ describe("runExtraction", () => {
     expect(onProgress).toHaveBeenNthCalledWith(2, { done: 2, total: 3 });
     expect(onProgress).toHaveBeenNthCalledWith(3, { done: 3, total: 3 });
     expect(summary.failed).toHaveLength(1);
+  });
+
+  it("rechaza un rango que se sale del PDF antes de enviar (y cobrar) ningún lote", async () => {
+    // Pedir 1-20 de un PDF de 8 páginas: los lotes 1-5 y 6-8 son válidos y se
+    // cobrarían si la comprobación viviera dentro del bucle, como antes.
+    const post = vi.fn().mockResolvedValue(okBatch);
+
+    await expect(
+      runExtraction(
+        { bytes: await makePdfBytes(8), title: "Libro", pageStart: 1, pageEnd: 20, level: "B2" },
+        { post },
+      ),
+    ).rejects.toThrow(/El PDF tiene 8 páginas y has pedido hasta la 20/);
+
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("acepta un rango que llega justo hasta la última página", async () => {
+    const post = vi.fn().mockResolvedValue(okBatch);
+    const summary = await runExtraction(
+      { bytes: await makePdfBytes(8), title: "Libro", pageStart: 1, pageEnd: 8, level: "B2" },
+      { post },
+    );
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(summary.failed).toHaveLength(0);
+  });
+
+  it("avisa de un PDF ilegible o cifrado sin gastar nada de API", async () => {
+    // PDFDocument.load lanza tanto con bytes que no son un PDF como con un PDF
+    // cifrado (EncryptedPDFError); las dos cosas salen por el mismo camino.
+    const post = vi.fn().mockResolvedValue(okBatch);
+
+    await expect(
+      runExtraction(
+        {
+          bytes: new Uint8Array([1, 2, 3, 4]),
+          title: "Libro",
+          pageStart: 1,
+          pageEnd: 5,
+          level: "B2",
+        },
+        { post },
+      ),
+    ).rejects.toThrow(/cifrado o dañado/);
+
+    expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe("assertBatchFits", () => {
+  function body(pdfBase64: string): PostBatchBody {
+    return { pdfBase64, title: "Libro", pageStart: 6, pageEnd: 10, level: "B2" };
+  }
+
+  it("deja pasar un lote que cabe en el límite de Vercel", () => {
+    expect(() => assertBatchFits(body("JVBERi0="))).not.toThrow();
+  });
+
+  it("rechaza un lote más pesado que el límite, diciendo qué páginas y qué hacer", () => {
+    // Se comprueba contra el límite real (4,4 MB), no contra uno de mentira:
+    // la cadena base64 es ASCII, así que su longitud son bytes exactos.
+    const enorme = "A".repeat(MAX_BATCH_BYTES + 1);
+    expect(() => assertBatchFits(body(enorme))).toThrow(/páginas 6-10/);
+    expect(() => assertBatchFits(body(enorme))).toThrow(/rango más corto/);
+  });
+});
+
+describe("runExtraction con lotes demasiado pesados", () => {
+  it("falla solo el lote que no cabe, sin enviarlo y sin abortar el resto", async () => {
+    const post = vi.fn().mockResolvedValue(okBatch);
+    // El cuerpo que se mide es el JSON entero del lote, no solo el PDF: un
+    // título gigante lo desborda igual que cinco páginas escaneadas, y así la
+    // prueba no necesita fabricar un PDF de 4,5 MB.
+    const summary = await runExtraction(
+      {
+        bytes: await makePdfBytes(20),
+        title: "L".repeat(MAX_BATCH_BYTES + 1),
+        pageStart: 1,
+        pageEnd: 10,
+        level: "B2",
+      },
+      { post },
+    );
+
+    expect(post).not.toHaveBeenCalled();
+    expect(summary.failed).toHaveLength(2);
+    expect(summary.failed[0]).toMatchObject({ pageStart: 1, pageEnd: 5 });
+    expect(summary.failed[0].error).toMatch(/4,5 MB/);
+    expect(summary.failed[1]).toMatchObject({ pageStart: 6, pageEnd: 10 });
   });
 });

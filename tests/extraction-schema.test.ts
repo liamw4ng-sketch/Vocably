@@ -26,7 +26,10 @@ describe("extractionSchema", () => {
   });
 
   it("rechaza un término al que le falta el contexto", () => {
-    const { context, ...sinContexto } = validTerm;
+    // Se quita el campo en vez de desestructurarlo para descartarlo: así no
+    // queda una variable sin usar, que es un aviso de ESLint.
+    const sinContexto: Record<string, unknown> = { ...validTerm };
+    delete sinContexto.context;
     expect(() => extractionSchema.parse({ terms: [sinContexto] })).toThrow();
   });
 

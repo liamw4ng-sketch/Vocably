@@ -21,6 +21,26 @@ export function planBatches(
   return batches;
 }
 
+/**
+ * Cuenta las páginas del PDF una sola vez, para poder validar el rango completo
+ * antes de enviar ningún lote. Un PDF cifrado o ilegible falla aquí, al abrirlo,
+ * sin haber gastado nada de API.
+ */
+export async function getPdfPageCount(bytes: Uint8Array): Promise<number> {
+  let document: PDFDocument;
+  try {
+    document = await PDFDocument.load(bytes);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "";
+    throw new Error(
+      `No se pudo leer el PDF: puede estar cifrado o dañado. No se ha enviado nada a la API.${
+        detail ? ` (${detail})` : ""
+      }`,
+    );
+  }
+  return document.getPageCount();
+}
+
 /** Devuelve un PDF nuevo con solo el rango pedido. Las páginas se cuentan desde 1. */
 export async function slicePdf(
   bytes: Uint8Array,

@@ -12,6 +12,14 @@ type Fields = {
   level?: string;
 };
 
+/** Lo único que se puede editar. Cualquier otra clave del cuerpo se ignora. */
+const TEXT_FIELDS = ["term", "translation"] as const;
+
+const FIELD_LABELS: Record<(typeof TEXT_FIELDS)[number], string> = {
+  term: "El término",
+  translation: "La traducción",
+};
+
 /** Postgres SQLSTATE para "unique_violation". */
 const UNIQUE_VIOLATION_CODE = "23505";
 
@@ -48,13 +56,47 @@ export async function PATCH(request: Request, context: Context) {
     return NextResponse.json({ error: "Identificador no válido." }, { status: 400 });
   }
 
-  const fields = (await request.json()) as Fields;
-
-  if (fields.type !== undefined && !extractedTermSchema.shape.type.safeParse(fields.type).success) {
-    return NextResponse.json({ error: "Tipo de término no válido." }, { status: 400 });
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "El cuerpo de la petición no es JSON válido." },
+      { status: 400 },
+    );
   }
-  if (fields.level !== undefined && !isCefrLevel(fields.level)) {
-    return NextResponse.json({ error: "Nivel del MCER no válido." }, { status: 400 });
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return NextResponse.json({ error: "El cuerpo de la petición no es válido." }, { status: 400 });
+  }
+
+  // Lista blanca: se copian solo los cuatro campos editables, así que ninguna
+  // otra clave del cuerpo (termNormalized, id, createdAt…) llega al UPDATE.
+  const received = body as Record<string, unknown>;
+  const fields: Fields = {};
+
+  for (const name of TEXT_FIELDS) {
+    if (received[name] === undefined) continue;
+    const value = received[name];
+    if (typeof value !== "string" || value.trim() === "") {
+      return NextResponse.json(
+        { error: `${FIELD_LABELS[name]} no puede quedar vacío.` },
+        { status: 400 },
+      );
+    }
+    fields[name] = value.trim();
+  }
+
+  if (received.type !== undefined) {
+    if (!extractedTermSchema.shape.type.safeParse(received.type).success) {
+      return NextResponse.json({ error: "Tipo de término no válido." }, { status: 400 });
+    }
+    fields.type = received.type as string;
+  }
+  if (received.level !== undefined) {
+    if (typeof received.level !== "string" || !isCefrLevel(received.level)) {
+      return NextResponse.json({ error: "Nivel del MCER no válido." }, { status: 400 });
+    }
+    fields.level = received.level;
   }
 
   try {
