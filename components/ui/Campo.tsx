@@ -52,7 +52,7 @@ export function Campo(props: CampoProps) {
       </label>
       {control}
       {error ? (
-        <p style={estiloTextoPequeno} className="text-valoracion-otra-vez">
+        <p style={estiloTextoPequeno} className="text-peligro">
           {error}
         </p>
       ) : ayuda ? (

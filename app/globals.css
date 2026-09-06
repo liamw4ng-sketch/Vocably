@@ -9,11 +9,23 @@
   --borde: #E5DCD1;
   --acento: #E1552C;
 
+  /* Superficies sólidas de acento (p.ej. el botón primario): --acento en sí
+     no alcanza 4.5:1 con texto blanco, así que las superficies de relleno
+     usan este tono más oscuro/saturado en su lugar. --acento no se toca. */
+  --acento-solido: #C9471F;
+  --texto-sobre-acento: #FFFFFF;
+
+  /* Acción destructiva (p.ej. el botón "peligro"). Distinto de los colores
+     de valoración de abajo: son conceptos no relacionados. */
+  --peligro: #B3261E;
+  --texto-sobre-peligro: #FFFFFF;
+
   /* Botones de valoración: mismo color en ambos temas, el texto siempre blanco */
   --valoracion-otra-vez: #D6402F;
-  --valoracion-dificil: #C77A16;
-  --valoracion-bien: #3E9D62;
-  --valoracion-facil: #3B7FA6;
+  --valoracion-dificil: #A4620F;
+  --valoracion-bien: #2E7D4C;
+  --valoracion-facil: #37769B;
+  --texto-sobre-valoracion: #FFFFFF;
 
   /* Escala tipográfica: 0.875 / 1 / 1.25 / 1.5 / 2 / 2.5 / 3 rem */
   --tamano-1: 0.875rem;
@@ -24,7 +36,13 @@
   --tamano-6: 2.5rem;
   --tamano-7: 3rem;
 
-  /* Espaciado: 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 px */
+  /* Espaciado: 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 px. Estos valores
+     coinciden exactamente con la escala numérica por defecto de Tailwind:
+     p-1 p-2 p-3 p-4 p-6 p-8 p-12 p-16 = 4/8/12/16/24/32/48/64px. Úsense esas
+     utilidades (o sus equivalentes m-/gap-/etc.) en vez de valores
+     arbitrarios; cualquier otro paso queda fuera del sistema de diseño
+     aprobado. Las variables se mantienen para documentar la escala y para
+     CSS crudo que no pase por Tailwind. */
   --espacio-1: 4px;
   --espacio-2: 8px;
   --espacio-3: 12px;
@@ -46,10 +64,15 @@
   --color-texto-suave: var(--texto-suave);
   --color-borde: var(--borde);
   --color-acento: var(--acento);
+  --color-acento-solido: var(--acento-solido);
+  --color-texto-sobre-acento: var(--texto-sobre-acento);
+  --color-peligro: var(--peligro);
+  --color-texto-sobre-peligro: var(--texto-sobre-peligro);
   --color-valoracion-otra-vez: var(--valoracion-otra-vez);
   --color-valoracion-dificil: var(--valoracion-dificil);
   --color-valoracion-bien: var(--valoracion-bien);
   --color-valoracion-facil: var(--valoracion-facil);
+  --color-texto-sobre-valoracion: var(--texto-sobre-valoracion);
   --radius-tarjeta: var(--radio-tarjeta);
   --radius-control: var(--radio-control);
   --font-serif: var(--fuente-serif);
@@ -64,6 +87,10 @@
     --texto-suave: #A79C90;
     --borde: #332E29;
     --acento: #FF7A4D;
+    --acento-solido: #FF7A4D;
+    --texto-sobre-acento: #141210;
+    --peligro: #FF8A80;
+    --texto-sobre-peligro: #141210;
   }
 }
 

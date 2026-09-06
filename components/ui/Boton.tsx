@@ -7,12 +7,13 @@ export type BotonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 // Cada variante lee únicamente los tokens de color definidos en globals.css.
-// El texto sobre un fondo de color siempre es blanco, igual que los botones
-// de valoración del sistema visual.
+// Los pares fondo/texto ya están calibrados en globals.css para cumplir el
+// mínimo de contraste 4.5:1 (acento-solido/peligro no son --acento ni los
+// colores de valoración: son superficies de relleno propias).
 const clasesPorVariante: Record<BotonVariante, string> = {
-  primario: "border border-transparent bg-acento text-white",
+  primario: "border border-transparent bg-acento-solido text-texto-sobre-acento",
   secundario: "border border-borde bg-transparent text-texto",
-  peligro: "border border-transparent bg-valoracion-otra-vez text-white",
+  peligro: "border border-transparent bg-peligro text-texto-sobre-peligro",
 };
 
 export function Boton({ variante = "primario", className = "", ...props }: BotonProps) {
