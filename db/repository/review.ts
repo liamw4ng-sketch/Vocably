@@ -22,6 +22,14 @@ export type CartaCola = {
   plazos: Record<Valoracion, string>;
 };
 
+/** Un decimal; si termina en ",0" se recorta; singular si el número es exactamente 1. */
+function formatUnidad(cantidad: number, singular: string, plural: string): string {
+  const conDecimal = cantidad.toFixed(1);
+  const texto = conDecimal.endsWith(".0") ? conDecimal.slice(0, -2) : conDecimal;
+  const esUno = texto === "1";
+  return `${texto.replace(".", ",")} ${esUno ? singular : plural}`;
+}
+
 /** "1 min", "10 min", "8 días", "1,3 años". Nunca se escriben a mano. */
 export function formatearPlazo(desde: Date, hasta: Date): string {
   const minutos = Math.round((hasta.getTime() - desde.getTime()) / 60000);
@@ -32,8 +40,8 @@ export function formatearPlazo(desde: Date, hasta: Date): string {
   const dias = Math.round(minutos / 1440);
   if (dias < 30) return `${dias} ${dias === 1 ? "día" : "días"}`;
   const meses = dias / 30.4;
-  if (meses < 12) return `${meses.toFixed(1).replace(".", ",")} meses`;
-  return `${(dias / 365).toFixed(1).replace(".", ",")} años`;
+  if (meses < 12) return formatUnidad(meses, "mes", "meses");
+  return formatUnidad(dias / 365, "año", "años");
 }
 
 export type OpcionesCola = { now: Date; source?: string; type?: string };
@@ -45,7 +53,10 @@ export type OpcionesCola = { now: Date; source?: string; type?: string };
  * Un término puede tener varias apariciones (se encontró en más de una
  * fuente), así que la consulta agrupa en JavaScript por `termId` y se queda
  * con la primera aparición — igual que `listTerms` en `db/repository/terms.ts` —
- * para no devolver la misma tarjeta dos veces.
+ * para no devolver la misma tarjeta dos veces. "Primera" está definida por el
+ * `ORDER BY` (asc(terms.id), asc(termOccurrences.id)): sin el desempate por
+ * `termOccurrences.id`, qué aparición sobrevive dependería del plan de
+ * consulta, no de cuál se guardó antes.
  */
 export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<CartaCola[]> {
   const filtros: SQL[] = [];
@@ -77,7 +88,7 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Car
     .leftJoin(termOccurrences, eq(termOccurrences.termId, terms.id))
     .leftJoin(sources, eq(sources.id, termOccurrences.sourceId))
     .where(filtros.length > 0 ? and(...filtros) : undefined)
-    .orderBy(asc(terms.id));
+    .orderBy(asc(terms.id), asc(termOccurrences.id));
 
   const vistos = new Set<number>();
   const nuevas: CartaCola[] = [];
