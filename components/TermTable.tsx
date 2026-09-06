@@ -60,15 +60,6 @@ export function TermTable() {
 
   const { search, source, level, type } = filters;
 
-  const loadOptions = useCallback(async () => {
-    try {
-      setEverything(await fetchTerms({}));
-    } catch {
-      // Si esto falla, la carga principal ya avisa del error; los desplegables
-      // se quedan con lo último que se supo.
-    }
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
 
@@ -91,9 +82,26 @@ export function TermTable() {
     };
   }, [search, source, level, type]);
 
+  // Efecto aparte, con su propio guard: puebla los desplegables una sola vez
+  // al montar, y no debe pisar ni ser pisado por las cargas de `rows` de arriba.
   useEffect(() => {
-    void loadOptions();
-  }, [loadOptions]);
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const options = await fetchTerms({});
+        if (!cancelled) setEverything(options);
+      } catch {
+        // Si esto falla, la carga principal ya avisa del error; los desplegables
+        // se quedan con lo último que se supo.
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /** Vuelve a leer del servidor sin pasar por "Cargando", para no tapar el error. */
   const refresh = useCallback(async () => {
@@ -102,8 +110,13 @@ export function TermTable() {
     } catch {
       setStatus("error");
     }
-    await loadOptions();
-  }, [search, source, level, type, loadOptions]);
+    try {
+      setEverything(await fetchTerms({}));
+    } catch {
+      // Si esto falla, la carga principal ya avisa del error; los desplegables
+      // se quedan con lo último que se supo.
+    }
+  }, [search, source, level, type]);
 
   function draftKey(id: number, field: EditableField) {
     return `${id}:${field}`;
