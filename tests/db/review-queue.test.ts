@@ -173,6 +173,17 @@ describe("getDueQueue", () => {
     expect(carta.plazos[4]).toBe("8 días");
   });
 
+  it("adelantar pasa del tope del día e introduce las nuevas que quedan", async () => {
+    await saveExtraction(db, { ...base, items: [termino(1), termino(2), termino(3)] });
+    // Con el tope a 0 no entra ninguna nueva: la cola normal llega vacía.
+    await setNewCardsPerDay(db, 0);
+    expect(await getDueQueue(db, { now: AHORA })).toHaveLength(0);
+
+    const adelantada = await getDueQueue(db, { now: AHORA, adelantar: true });
+    expect(adelantada).toHaveLength(3);
+    expect(adelantada.every((c) => c.esNueva)).toBe(true);
+  });
+
   it("una tarjeta ya respondida hoy no vuelve a la cola al recargar", async () => {
     await saveExtraction(db, { ...base, items: [termino(1), termino(2)] });
     expect(await getDueQueue(db, { now: AHORA })).toHaveLength(2);

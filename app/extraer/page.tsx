@@ -4,11 +4,16 @@ import { ExtractForm } from "@/components/ExtractForm";
 export default function ExtraerPage() {
   return (
     <main className="mx-auto flex max-w-xl flex-col gap-6 p-6">
-      <header className="flex items-baseline justify-between">
+      <header className="flex items-baseline justify-between gap-4">
         <h1 className="text-2xl font-semibold">Extraer vocabulario</h1>
-        <Link href="/biblioteca" className="underline">
-          Biblioteca
-        </Link>
+        <nav className="flex items-baseline gap-4">
+          <Link href="/repaso" className="underline">
+            Repaso
+          </Link>
+          <Link href="/biblioteca" className="underline">
+            Biblioteca
+          </Link>
+        </nav>
       </header>
       <ExtractForm />
     </main>

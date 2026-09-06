@@ -44,7 +44,13 @@ export function formatearPlazo(desde: Date, hasta: Date): string {
   return formatUnidad(dias / 365, "año", "años");
 }
 
-export type OpcionesCola = { now: Date; source?: string; type?: string };
+export type OpcionesCola = {
+  now: Date;
+  source?: string;
+  type?: string;
+  /** Acción explícita del usuario: introducir tarjetas nuevas por encima del tope del día. */
+  adelantar?: boolean;
+};
 
 /**
  * La cola del día: todo lo vencido, más tarjetas nuevas hasta el tope diario.
@@ -118,6 +124,10 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Car
     if (carta.esNueva) nuevas.push(carta);
     else if (f.due <= opts.now) vencidas.push(carta);
   }
+
+  // El tope es un ritmo por defecto, no un muro: el usuario puede pedir
+  // adelantar material nuevo, pero la app nunca se lo salta sola.
+  if (opts.adelantar) return [...vencidas, ...nuevas];
 
   const tope = await getNewCardsPerDay(db);
   return [...vencidas, ...nuevas.slice(0, tope)];

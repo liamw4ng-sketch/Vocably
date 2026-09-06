@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
+import { setNewCardsPerDay } from "@/db/repository/settings";
 
 let db: TestDb;
 let closeDb: () => Promise<void>;
@@ -51,6 +52,15 @@ describe("GET /api/repaso/cola", () => {
     expect(res.status).toBe(200);
     expect(body.cartas).toHaveLength(1);
     expect(body.cartas[0].term).toBe("come across");
+  });
+
+  it("con adelantar=1 entrega tarjetas nuevas aunque el tope sea 0", async () => {
+    await setNewCardsPerDay(db, 0);
+    const normal = await GET(new Request("http://localhost/api/repaso/cola"));
+    expect((await normal.json()).cartas).toHaveLength(0);
+
+    const adelantada = await GET(new Request("http://localhost/api/repaso/cola?adelantar=1"));
+    expect((await adelantada.json()).cartas).toHaveLength(1);
   });
 
   it("acepta filtros por tipo", async () => {
