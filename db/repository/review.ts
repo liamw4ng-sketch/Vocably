@@ -126,11 +126,13 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Car
   }
 
   // El tope es un ritmo por defecto, no un muro: el usuario puede pedir
-  // adelantar material nuevo, pero la app nunca se lo salta sola.
-  if (opts.adelantar) return [...vencidas, ...nuevas];
-
+  // adelantar material nuevo, pero la app nunca se lo salta sola. Adelantar
+  // introduce OTRO LOTE del mismo tamaño que el tope, no todo lo que quede
+  // en la biblioteca — el spec de diseño dice "otro lote", y un tope diario
+  // que un solo botón puede saltarse sin límite deja de ser un tope.
   const tope = await getNewCardsPerDay(db);
-  return [...vencidas, ...nuevas.slice(0, tope)];
+  const limiteNuevas = opts.adelantar ? tope * 2 : tope;
+  return [...vencidas, ...nuevas.slice(0, limiteNuevas)];
 }
 
 export type EntradaRespuesta = {

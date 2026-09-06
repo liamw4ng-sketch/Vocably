@@ -173,14 +173,19 @@ describe("getDueQueue", () => {
     expect(carta.plazos[4]).toBe("8 días");
   });
 
-  it("adelantar pasa del tope del día e introduce las nuevas que quedan", async () => {
-    await saveExtraction(db, { ...base, items: [termino(1), termino(2), termino(3)] });
-    // Con el tope a 0 no entra ninguna nueva: la cola normal llega vacía.
-    await setNewCardsPerDay(db, 0);
-    expect(await getDueQueue(db, { now: AHORA })).toHaveLength(0);
+  it("adelantar añade un lote más del tope, no todo lo que queda", async () => {
+    // 10 términos nuevos disponibles, tope de 2: la cola normal se queda en 2,
+    // y adelantar debe entregar exactamente 4 (2 × tope) — ni 2 (el tope sin
+    // más) ni 10 (todo lo que queda), que es justo lo que el spec de diseño
+    // llama "otro lote", no "el resto de la biblioteca".
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    await setNewCardsPerDay(db, 2);
+
+    const normal = await getDueQueue(db, { now: AHORA });
+    expect(normal).toHaveLength(2);
 
     const adelantada = await getDueQueue(db, { now: AHORA, adelantar: true });
-    expect(adelantada).toHaveLength(3);
+    expect(adelantada).toHaveLength(4);
     expect(adelantada.every((c) => c.esNueva)).toBe(true);
   });
 

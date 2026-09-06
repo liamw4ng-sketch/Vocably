@@ -7,7 +7,7 @@ export default function BibliotecaPage() {
       <header className="flex items-baseline justify-between gap-4">
         <h1 className="text-2xl font-semibold">Biblioteca</h1>
         <nav className="flex items-baseline gap-4">
-          <Link href="/repaso" className="underline">
+          <Link href="/repaso" className="inline-flex min-h-12 items-center underline">
             Repaso
           </Link>
           <Link href="/extraer" className="underline">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CartaCola } from "@/db/repository/review";
 import { crearSesion, type EnvioRespuesta, type Sesion, type Valoracion } from "@/lib/review-session";
@@ -137,6 +137,17 @@ export function SesionRepaso() {
   // `Sesion` es un objeto mutable sin React dentro: hay que pedir el redibujo.
   const [, redibujar] = useReducer((n: number) => n + 1, 0);
 
+  // Se lee dentro de callbacks async (valorar) para no tocar estado tras
+  // desmontar, igual que el guard `cancelado` del efecto de carga inicial de
+  // abajo, pero aquí como ref porque el disparador es un evento, no un efecto.
+  const montadoRef = useRef(true);
+  useEffect(() => {
+    montadoRef.current = true;
+    return () => {
+      montadoRef.current = false;
+    };
+  }, []);
+
   // Carga inicial: función async dentro del efecto con su guard, igual que en
   // TermTable, para no encadenar renders desde el cuerpo del efecto.
   useEffect(() => {
@@ -193,6 +204,7 @@ export function SesionRepaso() {
       if (!sesion.cartaActual()) {
         setGuardando(true);
         void sesion.pendientes().then(() => {
+          if (!montadoRef.current) return;
           setGuardando(false);
           redibujar();
         });

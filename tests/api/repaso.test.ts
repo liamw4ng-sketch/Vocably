@@ -54,13 +54,33 @@ describe("GET /api/repaso/cola", () => {
     expect(body.cartas[0].term).toBe("come across");
   });
 
-  it("con adelantar=1 entrega tarjetas nuevas aunque el tope sea 0", async () => {
-    await setNewCardsPerDay(db, 0);
+  it("con adelantar=1 entrega un lote más del tope, no todo lo que queda", async () => {
+    // El beforeEach ya guardó un término ("come across"); se añaden más para
+    // tener 10 nuevas disponibles en total con las que distinguir un lote
+    // fijo de "todo lo que queda".
+    await saveExtraction(db, {
+      title: "Libro",
+      pageStart: 1,
+      pageEnd: 5,
+      level: "B2",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      items: Array.from({ length: 9 }, (_, i) => ({
+        term: `palabra${i}`,
+        type: "word" as const,
+        translation: `traducción${i}`,
+        context: `Frase con palabra${i}.`,
+        example: `Ejemplo con palabra${i}.`,
+      })),
+    });
+    await setNewCardsPerDay(db, 2);
+
     const normal = await GET(new Request("http://localhost/api/repaso/cola"));
-    expect((await normal.json()).cartas).toHaveLength(0);
+    expect((await normal.json()).cartas).toHaveLength(2);
 
     const adelantada = await GET(new Request("http://localhost/api/repaso/cola?adelantar=1"));
-    expect((await adelantada.json()).cartas).toHaveLength(1);
+    expect((await adelantada.json()).cartas).toHaveLength(4);
   });
 
   it("acepta filtros por tipo", async () => {
