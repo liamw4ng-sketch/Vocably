@@ -106,10 +106,11 @@ anteriores ya están guardadas y solo se reintenta el trozo roto.
 - Las páginas van como bloque `document` en base64, antes del bloque de texto. Claude
   lee texto e imágenes de cada página, de modo que un PDF escaneado y uno digital
   siguen el mismo camino, sin detección previa.
-- Respuesta con salida estructurada (`output_config.format`): un array de objetos con
-  `term`, `type`, `translation`, `context`, `example`. Nunca hay que interpretar una
-  tabla de texto.
-- Se llama con `.stream()` y `.finalMessage()`, con `max_tokens: 16000`.
+- Respuesta con salida estructurada: se llama a `client.messages.parse()` con
+  `output_config: { format: zodOutputFormat(...) }` y se lee `response.parsed_output`,
+  ya validado contra el esquema. Nunca hay que interpretar una tabla de texto.
+- Sin streaming, con `max_tokens: 16000`: un lote de 5 páginas cabe de sobra y la
+  respuesta se necesita entera antes de guardarla.
 
 El prompt reproduce la instrucción del usuario y añade dos reglas que evitan invenciones:
 
