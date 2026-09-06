@@ -1,0 +1,25 @@
+{
+  "terms": [
+    {
+      "term": "come across",
+      "type": "phrasal_verb",
+      "translation": "encontrarse con",
+      "context": "I came across an old photo of my grandmother.",
+      "example": "She came across an interesting article about climate change."
+    },
+    {
+      "term": "reluctant",
+      "type": "word",
+      "translation": "reacio",
+      "context": "He was reluctant to speak in public.",
+      "example": "I was reluctant to accept the offer at first."
+    },
+    {
+      "term": "under the weather",
+      "type": "expression",
+      "translation": "pachucho, indispuesto",
+      "context": "She's feeling a bit under the weather today.",
+      "example": "I stayed home because I was under the weather."
+    }
+  ]
+}
