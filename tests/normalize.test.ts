@@ -23,7 +23,20 @@ describe("normalizeTerm", () => {
     expect(normalizeTerm(once)).toBe(once);
   });
 
-  it("conserva los acentos como caracteres compuestos iguales", () => {
-    expect(normalizeTerm("café")).toBe(normalizeTerm("café"));
+  it("normaliza NFD y NFC de un mismo término a la misma clave", () => {
+    // Escapes explícitos (\uXXXX) para que ningún editor o herramienta pueda
+    // renormalizar en silencio los literales de este fichero.
+    // NFD: "cafe" + acento agudo combinante U+0301 (forma descompuesta, 5 code units).
+    const nfd = "cafe\u0301";
+    // NFC: "e" acentuada precompuesta U+00E9 (forma compuesta, 4 code units).
+    const nfc = "caf\u00e9";
+
+    // Comprueba que las dos formas son secuencias de code units distintas
+    // antes de normalizar: si esto fallara, la comparación de abajo no
+    // demostraría nada (la prueba sería tautológica).
+    expect(nfd).not.toBe(nfc);
+    expect(nfd.length).not.toBe(nfc.length);
+
+    expect(normalizeTerm(nfd)).toBe(normalizeTerm(nfc));
   });
 });
