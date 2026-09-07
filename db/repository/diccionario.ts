@@ -5,6 +5,7 @@ import { filasDeLinea, type FilaDiccionario } from "@/lib/diccionario/entrada";
 import { variantesDelLema } from "@/lib/diccionario/lema";
 import { normalizeTerm } from "@/lib/normalize";
 import { tipoDeTermino } from "@/lib/diccionario/tipo";
+import type { Traductor } from "@/lib/diccionario/traductor";
 
 /** 500 filas por INSERT: por encima, el número de parámetros incomoda al driver. */
 const TAMANO_LOTE = 500;
@@ -90,6 +91,41 @@ export async function buscarEnDiccionario(
     if (filas.length > 0) return filas;
   }
   return [];
+}
+
+/**
+ * Rellena el español que falte y lo guarda. Una palabra se traduce **una vez en
+ * la vida**: es lo que hace que caerse el servicio ajeno sea un problema
+ * pequeño en vez de una función rota.
+ */
+export async function traducirSiFalta(
+  db: Database,
+  acepciones: AcepcionDiccionario[],
+  traductor: Traductor,
+): Promise<AcepcionDiccionario[]> {
+  // Un término puede tener varias acepciones sin español; se traduce el término
+  // una sola vez y el resultado sirve para todas.
+  const cache = new Map<string, string[]>();
+
+  const resultado: AcepcionDiccionario[] = [];
+  for (const acepcion of acepciones) {
+    if (acepcion.translations.length > 0) {
+      resultado.push(acepcion);
+      continue;
+    }
+    const clave = acepcion.term.toLowerCase();
+    const traducciones = cache.get(clave) ?? (await traductor(acepcion.term));
+    cache.set(clave, traducciones);
+
+    if (traducciones.length > 0) {
+      await db
+        .update(dictionaryEntries)
+        .set({ translations: traducciones, translationSource: "mymemory" })
+        .where(eq(dictionaryEntries.id, acepcion.id));
+    }
+    resultado.push({ ...acepcion, translations: traducciones });
+  }
+  return resultado;
 }
 
 /** Lo que el usuario ya tiene guardado de ese término, con todas sus acepciones. */

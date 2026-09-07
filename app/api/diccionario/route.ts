@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { buscarEnDiccionario, buscarEnBiblioteca } from "@/db/repository/diccionario";
+import { buscarEnDiccionario, buscarEnBiblioteca, traducirSiFalta } from "@/db/repository/diccionario";
+import { crearTraductorMyMemory } from "@/lib/diccionario/traductor";
 import { getDb } from "@/db/client";
 
 /**
@@ -18,6 +19,8 @@ export async function GET(request: Request) {
     buscarEnDiccionario(db, termino),
   ]);
 
+  const conEspanol = await traducirSiFalta(db, acepciones, crearTraductorMyMemory());
+
   // La única forma fiable de saber si una acepción concreta ya está guardada:
   // dos entradas pueden compartir término ("bank" = orilla / banco) y solo la
   // pista en inglés (senseHint === gloss) distingue una de otra.
@@ -25,6 +28,6 @@ export async function GET(request: Request) {
   return NextResponse.json({
     termino,
     enBiblioteca,
-    acepciones: acepciones.map((a) => ({ ...a, yaGuardada: pistasGuardadas.has(a.gloss) })),
+    acepciones: conEspanol.map((a) => ({ ...a, yaGuardada: pistasGuardadas.has(a.gloss) })),
   });
 }

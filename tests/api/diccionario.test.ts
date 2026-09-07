@@ -5,9 +5,11 @@ vi.mock("@/db/client", () => ({ getDb: () => db.valor }));
 
 const buscarEnDiccionario = vi.fn();
 const buscarEnBiblioteca = vi.fn();
+const traducirSiFalta = vi.fn(async (_db: unknown, acepciones: unknown) => acepciones);
 vi.mock("@/db/repository/diccionario", () => ({
   buscarEnDiccionario: (...args: unknown[]) => buscarEnDiccionario(...args),
   buscarEnBiblioteca: (...args: unknown[]) => buscarEnBiblioteca(...args),
+  traducirSiFalta: (db: unknown, acepciones: unknown) => traducirSiFalta(db, acepciones),
 }));
 
 const { GET } = await import("@/app/api/diccionario/route");
