@@ -15,6 +15,9 @@ export default function DiccionarioPage() {
           <Link href="/biblioteca" className="inline-flex min-h-12 items-center underline">
             Biblioteca
           </Link>
+          <Link href="/extraer" className="inline-flex min-h-12 items-center underline">
+            Extraer
+          </Link>
         </nav>
       </header>
       <BuscadorDiccionario />

@@ -101,12 +101,14 @@ La búsqueda recorre cuatro escalones y se para en el primero que responde:
 |---|---|---|---|
 | 1 | La biblioteca del usuario | instantáneo | 0 € |
 | 2 | La tabla del diccionario (cargada de Wikcionario, ver más abajo) | instantáneo | 0 € |
-| 3 | El traductor MyMemory, solo si a la entrada le falta el español | ~1 s, y el resultado se guarda para siempre | 0 € |
+| 3 | El traductor MyMemory, solo si a la entrada le falta el español | ~1 s (5 s como mucho), y se guarda si la acepción es única | 0 € |
 | 4 | Claude, solo si se pulsa "Afinar con IA" | ~3 s | unos céntimos |
 
-Si el término ya está en la biblioteca, sale marcado como "ya está en tu
-repaso" en vez de ofrecerse a añadirlo de nuevo, salvo que sea una acepción
-distinta de las que ya tiene. `GET /api/diccionario` resuelve los escalones 1
+Si el término ya está en la biblioteca, la pantalla abre con un bloque **"Ya
+en tu repaso"** —la traducción guardada, el nivel y cuándo vuelve a tocar— y
+esa acepción no se ofrece para añadirla otra vez; las demás sí. Una palabra
+guardada que Wikcionario no trae sale ahí igualmente: decir que "no está en el
+diccionario" algo que el usuario ya tiene sería mentira. `GET /api/diccionario` resuelve los escalones 1
 a 3; **no llama a Claude nunca**. El escalón 4 vive aparte, en
 `POST /api/diccionario/afinar`, precisamente para que se vea de un vistazo que
 ninguna otra ruta del diccionario toca la API.
@@ -142,12 +144,23 @@ pegado a su definición: probado a mano, pegarlos rompe la traducción (*"come
 across: to give an impression"* vuelve como *"venir a través: para dar una
 impresión"*, partiendo el verbo frasal en dos).
 
-Cada traducción se guarda en su fila del diccionario la primera vez que hace
-falta: un término se traduce una sola vez en toda la vida de la app. Eso es lo
-que hace robusto depender de un servicio gratuito ajeno — si MyMemory se cae,
-lo ya buscado antes sigue funcionando igual; solo lo nuevo se queda sin
-traducción al español, con el significado en inglés y el ejemplo listos de
-todas formas, y el botón "Afinar con IA" como alternativa.
+La traducción se guarda en su fila del diccionario **solo cuando el término
+tiene una única acepción sin español**. Ahí, y solo ahí, la respuesta es de
+verdad de esa acepción: al traductor se le manda el término suelto, así que lo
+que vuelve es la traducción de la palabra, no la de un significado concreto.
+Si hay varias acepciones sin español —*bank* tiene siete entradas—, la
+traducción se enseña en todas pero no se cachea en ninguna: escribir "banco"
+en la acepción de orilla y darla por buena la dejaría mal para siempre,
+porque una fila cacheada no se vuelve a consultar. Preguntar otra vez es
+gratis; equivocarse en la base, no.
+
+La llamada se corta a los cinco segundos (`AbortSignal.timeout`). Un servicio
+caído ya estaba cubierto, pero uno colgado dejaba esperando a la búsqueda
+entera, que para entonces ya tiene el significado y el ejemplo listos para
+enseñar. Si MyMemory no contesta, la ficha sale igual sin español y quedan dos
+salidas: **escribir la traducción a mano** en la propia ficha, que es gratis y
+es la que manda si se usa, o el botón "Afinar con IA", que cuesta unos
+céntimos.
 
 ### Cargar el diccionario
 
@@ -356,6 +369,10 @@ palabra suelta en vez de por lote de páginas; en la pantalla no se muestra un
 importe calculado, solo el aviso fijo "Afinar cuesta unos céntimos. Todo lo
 demás de esta pantalla es gratis."
 
+El botón desaparece en cuanto la acepción está guardada: afinar reescribe la
+caché del diccionario, no la ficha ya creada en `terms`, así que pulsarlo
+entonces cobraría por un cambio que la tarjeta de repaso no llegaría a ver.
+
 ## Prueba de aceptación
 
 ### Fase 1 (extracción y biblioteca)
@@ -405,8 +422,8 @@ verifique todo lo siguiente:
   manifiesto para instalar la app en el móvil con `start_url` en `/repaso`. No
   consume la API de Claude en ningún momento (ver "Coste"). Pendiente solo la
   prueba de aceptación de más arriba, que hace el usuario en su móvil.
-- La suite completa suma **197 pruebas**, ninguna contra la API de Claude ni
-  contra una base de datos real.
+- La suite completa suma **304 pruebas**, ninguna contra la API de Claude ni
+  contra MyMemory ni contra una base de datos real.
 - **No hay pruebas de componentes.** Vitest corre con `environment: "node"`,
   sin jsdom ni Testing Library, así que ninguna prueba puede pulsar un botón
   ni comprobar qué se pinta. Lo que se prueba de la interfaz son sus funciones

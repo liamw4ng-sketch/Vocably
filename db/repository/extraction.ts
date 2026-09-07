@@ -35,9 +35,14 @@ export type SaveExtractionResult = {
  * y por cada término crea el término (si es nuevo) o reutiliza el existente
  * (si ya estaba guardado), añadiendo siempre una nueva aparición.
  *
- * La deduplicación se hace por el término normalizado, así que un término
- * repetido nunca gana una segunda tarjeta ni pierde su progreso de repaso,
- * y una traducción corregida a mano por el usuario nunca se sobrescribe.
+ * La deduplicación se hace por la pareja (término normalizado, pista), y todo
+ * lo que sale de un PDF lleva **la pista vacía**: una extracción solo fusiona
+ * con lo que tampoco la tiene. Ese es el invariante que protege los términos
+ * ya guardados —un término repetido nunca gana una segunda tarjeta ni pierde
+ * su progreso de repaso, y una traducción corregida a mano nunca se
+ * sobrescribe— y, a la vez, deja aparte las acepciones concretas añadidas
+ * desde el diccionario: "bank" → orilla no absorbe ni es absorbida por el
+ * "bank" genérico de un libro.
  */
 export async function saveExtraction(
   db: Database,

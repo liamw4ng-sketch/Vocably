@@ -4,8 +4,10 @@ import { crearTraductorMyMemory } from "@/lib/diccionario/traductor";
 import { getDb } from "@/db/client";
 
 /**
- * Los escalones 1 y 2 de la búsqueda. **No llama a Claude nunca**: lo único que
- * cuesta dinero vive en /api/diccionario/afinar, aparte y a propósito.
+ * Los escalones 1, 2 y 3 de la búsqueda: la biblioteca, la tabla del
+ * diccionario y, si falta el español, el traductor gratuito. **No llama a
+ * Claude nunca**: lo único que cuesta dinero vive en /api/diccionario/afinar,
+ * aparte y a propósito.
  */
 export async function GET(request: Request) {
   const termino = (new URL(request.url).searchParams.get("q") ?? "").trim();

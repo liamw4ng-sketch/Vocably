@@ -77,10 +77,13 @@ export async function updateTerm(
   id: number,
   fields: { term?: string; translation?: string; type?: string; level?: string },
 ): Promise<void> {
-  // El término normalizado es la clave de deduplicación que usa saveExtraction
-  // (ver db/repository/extraction.ts). Si no se recalcula al editar `term`,
-  // una extracción futura con la forma corregida no encontrará este término
-  // y creará uno duplicado en vez de fusionarse con él.
+  // El término normalizado es media clave de deduplicación: saveExtraction
+  // busca por la pareja (término normalizado, pista), con la pista vacía en
+  // todo lo que viene de un PDF (ver db/repository/extraction.ts). Si no se
+  // recalcula al editar `term`, una extracción futura con la forma corregida
+  // no encontrará este término y creará uno duplicado en vez de fusionarse
+  // con él. La otra mitad, la pista, no se edita desde aquí a propósito:
+  // cambiarla sería mover la ficha a otra acepción.
   const values: Partial<typeof terms.$inferInsert> = { ...fields, updatedAt: new Date() };
   if (fields.term !== undefined) {
     values.termNormalized = normalizeTerm(fields.term);

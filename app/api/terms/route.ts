@@ -55,7 +55,10 @@ export async function POST(request: Request) {
 
   const resultado = await anadirDesdeDiccionario(getDb(), {
     term: term.trim(),
-    pos,
+    // Recortado, igual que se validó: `tipoDeTermino` compara `pos` con
+    // "verb" tal cual, así que un "verb " con un espacio de más clasificaría
+    // el término como expresión en vez de como verbo frasal.
+    pos: pos.trim(),
     gloss: gloss.trim(),
     example: example?.trim() || null,
     translation: translation.trim(),

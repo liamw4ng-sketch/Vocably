@@ -264,6 +264,23 @@ describe("POST /api/terms", () => {
     expect(row.translation).toBe("orilla");
   });
 
+  it("un pos con espacios sobrantes sigue clasificando el verbo frasal como tal", async () => {
+    const res = await POST(
+      postRequest({
+        term: "put up with",
+        pos: " verb ",
+        gloss: "To tolerate.",
+        translation: "aguantar",
+        level: "B2",
+      }),
+    );
+    expect(res.status).toBe(201);
+    const [row] = await listTerms(testDb, {});
+    // Sin recortar `pos`, "verb " no es "verb" y el término caía en
+    // "expression", que es otro filtro y otra etiqueta en la tarjeta.
+    expect(row.type).toBe("phrasal_verb");
+  });
+
   it("sin nivel responde 400 y no guarda nada", async () => {
     const res = await POST(
       postRequest({ term: "bank", pos: "noun", gloss: "x", translation: "orilla" }),
