@@ -84,6 +84,23 @@ morados, nada de mascotas.
 | Bien | `#3E9D62` |
 | Fácil | `#3B7FA6` |
 
+**Corrección (2026-09-07):** tres de esos cuatro colores no llegaban a 4,5:1 con
+texto blanco y se oscurecieron al aplicarlos. Lo que hay en `app/globals.css`, que
+es la fuente de verdad, es:
+
+| Botón | Color del plan | Color real |
+|---|---|---|
+| Otra vez | `#D6402F` | `#D6402F` (sin cambio) |
+| Difícil | `#C77A16` | `#A4620F` |
+| Bien | `#3E9D62` | `#2E7D4C` |
+| Fácil | `#3B7FA6` | `#37769B` |
+
+Por el mismo motivo hay tres tokens que el plan no preveía: `--acento-solido`
+(superficie de relleno del botón primario — `--acento` con texto blanco no llega a
+4,5:1, y `--acento` no se toca porque se usa como tinte al 15%),
+`--texto-sobre-acento` y `--texto-sobre-valoracion`. Las variantes de `Boton` y los
+cuatro botones de valoración leen estos pares, no los colores sueltos.
+
 **Escala tipográfica:** 0.875 / 1 / 1.25 / 1.5 / 2 / 2.5 / 3 rem.
 **Espaciado:** 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 px.
 **Radios:** 16px tarjetas, 12px botones y campos.
@@ -711,6 +728,35 @@ export async function getDueQueue(
   return [...vencidas, ...nuevas.slice(0, tope)];
 }
 ```
+
+**Corrección (2026-09-07):** `nuevas.slice(0, tope)` **no es un tope diario**, y el
+plan se equivocaba al darlo por bueno. `esNueva` es `state === State.New`, así que
+responder el lote del día saca esas tarjetas del estado `New`: recargar `/repaso`
+entregaba otro lote entero, y otro, hasta agotar la biblioteca — justo lo que el
+spec quiere impedir ("Extraer 80 términos de golpe no debe convertirse en 80
+tarjetas al día siguiente"), y en silencio, porque la app parece funcionar. Lo
+implementado en su lugar:
+
+- `review_logs.state` guarda el estado **anterior** a esa respuesta, así que una
+  fila con `state = 0` es la introducción de una tarjeta nueva. El cupo del día es
+  `max(0, tope - introducidasHoy)`, con
+  `introducidasHoy = count(review_logs where state = 0 and reviewed_at >= inicio del día)`.
+- **El día empieza a medianoche en `Europe/Madrid`**, no en UTC: constante
+  `ZONA_HORARIA` en `lib/dia.ts`, con `inicioDelDia(now)` calculado en TypeScript a
+  partir del `now` que ya recibe el repositorio (nunca `new Date()` dentro del
+  repositorio, para que las pruebas manden sobre el reloj). No es una columna nueva
+  en base de datos: hay una sola usuaria y está en España; si eso cambia, es una
+  línea.
+- **Lo vencido sigue llegando entero**: ningún tope lo recorta, ni siquiera con el
+  cupo del día gastado.
+- `adelantar` concede **otro lote del tamaño del tope sobre lo ya introducido hoy**
+  (cupo = `tope`), no `tope * 2`. Con la semántica diaria, el botón solo aparece
+  cuando el cupo está gastado, y ahí doblar un cupo gastado seguiría dando cero: el
+  botón no podía funcionar en ningún caso.
+- Con el tope a 0, la pantalla de cola vacía no ofrece "adelantar" (no podría dar
+  nada) y sí el control del tope, que antes vivía solo en la pantalla de fin de
+  sesión — con el tope a 0 esa pantalla era inalcanzable y no hay pantalla de
+  ajustes: el usuario se quedaba encerrado.
 
 - [ ] **Step 4: Ejecutar y comprobar que pasan**
 
