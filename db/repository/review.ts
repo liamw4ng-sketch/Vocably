@@ -1,9 +1,10 @@
-import { and, eq, asc, type SQL } from "drizzle-orm";
+import { and, eq, asc, gte, count, type SQL } from "drizzle-orm";
 import { terms, termOccurrences, cardStates, sources, reviewLogs } from "@/db/schema";
 import { getNewCardsPerDay } from "@/db/repository/settings";
 import type { Database } from "@/db/types";
 import { State, fsrs, type Grade } from "ts-fsrs";
 import { toFsrsCard, fromFsrsCard } from "@/lib/fsrs";
+import { inicioDelDia } from "@/lib/dia";
 
 const programador = fsrs();
 
@@ -51,6 +52,27 @@ export type OpcionesCola = {
   /** Acción explícita del usuario: introducir tarjetas nuevas por encima del tope del día. */
   adelantar?: boolean;
 };
+
+/**
+ * Cuántas tarjetas nuevas se han introducido hoy.
+ *
+ * `review_logs.state` guarda el estado que tenía la tarjeta ANTES de esa
+ * respuesta, así que una fila con `state = 0` (State.New) es exactamente eso:
+ * la primera vez que se contestó a esa tarjeta. Contarlas es lo que hace que
+ * el tope sea diario. Sin esto, el tope se aplicaba sobre "las que todavía
+ * están en estado New", y responder el lote del día las sacaba de ese estado:
+ * recargar la página entregaba otro lote entero, y otro, hasta agotar la
+ * biblioteca — sin ningún error visible.
+ */
+async function introducidasHoy(db: Database, ahora: Date): Promise<number> {
+  const [fila] = await db
+    .select({ cantidad: count() })
+    .from(reviewLogs)
+    .where(
+      and(eq(reviewLogs.state, State.New), gte(reviewLogs.reviewedAt, inicioDelDia(ahora))),
+    );
+  return fila?.cantidad ?? 0;
+}
 
 /**
  * La cola del día: todo lo vencido, más tarjetas nuevas hasta el tope diario.
@@ -125,13 +147,21 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Car
     else if (f.due <= opts.now) vencidas.push(carta);
   }
 
-  // El tope es un ritmo por defecto, no un muro: el usuario puede pedir
-  // adelantar material nuevo, pero la app nunca se lo salta sola. Adelantar
-  // introduce OTRO LOTE del mismo tamaño que el tope, no todo lo que quede
-  // en la biblioteca — el spec de diseño dice "otro lote", y un tope diario
-  // que un solo botón puede saltarse sin límite deja de ser un tope.
+  // El tope es DIARIO: lo que queda de cupo es el tope menos lo que ya se ha
+  // introducido hoy, no el tope entero en cada petición.
+  //
+  // El tope es además un ritmo por defecto, no un muro: el usuario puede
+  // pedir adelantar material nuevo, pero la app nunca se lo salta sola.
+  // Adelantar concede OTRO LOTE del tamaño del tope sobre lo ya introducido
+  // hoy (cupo = tope, se hubiera gastado o no), no el doble de un cupo que ya
+  // está gastado —que no daría nada, que es el estado en el que la interfaz
+  // enseña el botón— ni todo lo que quede en la biblioteca: el spec de diseño
+  // dice "otro lote", y un tope diario que un botón se salta sin límite deja
+  // de ser un tope.
   const tope = await getNewCardsPerDay(db);
-  const limiteNuevas = opts.adelantar ? tope * 2 : tope;
+  const limiteNuevas = opts.adelantar
+    ? tope
+    : Math.max(0, tope - (await introducidasHoy(db, opts.now)));
   return [...vencidas, ...nuevas.slice(0, limiteNuevas)];
 }
 

@@ -161,6 +161,13 @@ export function TermTable() {
   // deje claro cuándo se ha guardado. Se limpia en cuanto el campo se vuelve
   // a tocar (ver setDraft) o al empezar un nuevo intento de guardado.
   const [guardados, setGuardados] = useState<Record<string, boolean>>({});
+  // Qué término está esperando confirmación para borrarse (null: ninguno).
+  // Borrar arrastra `card_states` y `review_logs`: se lleva por delante meses
+  // de planificación, sin deshacer. El botón vive a un dedo del campo de
+  // edición del término, así que un toque mal dado en el móvil no puede ser
+  // suficiente. No se usa `confirm()` del navegador: rompe el diseño, no se
+  // puede traducir bien y en el móvil aparece pegado a la barra del sistema.
+  const [porBorrar, setPorBorrar] = useState<number | null>(null);
 
   const { search, source, level, type } = filters;
 
@@ -298,6 +305,7 @@ export function TermTable() {
     await refresh();
   }
 
+  /** Borra de verdad. Solo se llama desde la confirmación, nunca del primer toque. */
   async function remove(id: number) {
     setRowError(id, "");
     try {
@@ -393,7 +401,8 @@ export function TermTable() {
                     <Boton
                       type="button"
                       variante="peligro"
-                      onClick={() => void remove(row.id)}
+                      onClick={() => setPorBorrar(row.id)}
+                      aria-expanded={porBorrar === row.id}
                       className="shrink-0"
                     >
                       Borrar
@@ -403,6 +412,43 @@ export function TermTable() {
                     <p style={TEXTO_1} className="-mt-2 text-texto-suave">
                       Guardado
                     </p>
+                  )}
+
+                  {porBorrar === row.id && (
+                    <div
+                      role="group"
+                      aria-label={`Confirmar el borrado de ${row.term}`}
+                      className="flex flex-col gap-3 rounded-control border border-peligro p-4"
+                    >
+                      <p style={TEXTO_2}>
+                        ¿Seguro que quieres borrar{" "}
+                        <span className="font-serif font-semibold">{row.term}</span>? Se
+                        borrará también todo su historial de repaso y no se puede deshacer.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Boton
+                          type="button"
+                          variante="peligro"
+                          onClick={() => {
+                            // Se cierra la confirmación antes de llamar: si el
+                            // servidor responde 409 o se cae la red, el aviso
+                            // de la fila es lo que se ve, no dos mensajes
+                            // superpuestos. `remove` no cambia.
+                            setPorBorrar(null);
+                            void remove(row.id);
+                          }}
+                        >
+                          Sí, borrar
+                        </Boton>
+                        <Boton
+                          type="button"
+                          variante="secundario"
+                          onClick={() => setPorBorrar(null)}
+                        >
+                          Cancelar
+                        </Boton>
+                      </div>
+                    </div>
                   )}
 
                   <Campo

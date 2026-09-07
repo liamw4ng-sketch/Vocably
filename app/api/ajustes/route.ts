@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
-import {
-  getNewCardsPerDay,
-  setNewCardsPerDay,
-  TOPE_MAXIMO_TARJETAS_NUEVAS as TOPE_MAXIMO,
-} from "@/db/repository/settings";
+import { getNewCardsPerDay, setNewCardsPerDay } from "@/db/repository/settings";
+import { TOPE_MAXIMO_TARJETAS_NUEVAS as TOPE_MAXIMO } from "@/lib/ajustes";
 import { getDb } from "@/db/client";
 
 type Body = { newCardsPerDay?: number };

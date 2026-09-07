@@ -5,12 +5,6 @@ import type { Database } from "@/db/types";
 const FILA = 1;
 export const TOPE_POR_DEFECTO = 20;
 
-/** Tope máximo de tarjetas nuevas al día: un valor por encima de esto ya no
- * es una preferencia razonable, es un error de digitación. Lo valida
- * `app/api/ajustes/route.ts` y lo usa como límite del control del cliente
- * en `components/SesionRepaso.tsx` — una sola fuente para los dos. */
-export const TOPE_MAXIMO_TARJETAS_NUEVAS = 200;
-
 export async function getNewCardsPerDay(db: Database): Promise<number> {
   const filas = await db.select().from(settings).where(eq(settings.id, FILA)).limit(1);
   return filas[0]?.newCardsPerDay ?? TOPE_POR_DEFECTO;

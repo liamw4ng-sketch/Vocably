@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CartaCola } from "@/db/repository/review";
-import { TOPE_MAXIMO_TARJETAS_NUEVAS } from "@/db/repository/settings";
+import { TOPE_MAXIMO_TARJETAS_NUEVAS } from "@/lib/ajustes";
 import { crearSesion, type EnvioRespuesta, type Sesion, type Valoracion } from "@/lib/review-session";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
@@ -174,9 +174,10 @@ export function SesionRepaso() {
   // la sesión ya terminó.
   const [version, redibujar] = useReducer((n: number) => n + 1, 0);
 
-  // Control del tope de tarjetas nuevas, mostrado solo en la pantalla de fin
-  // de sesión. `tope === null` significa "aún no se ha pedido al servidor,
-  // o la petición falló" — cuál de las dos es `topeCargaFallo`, más abajo.
+  // Control del tope de tarjetas nuevas, mostrado en las dos pantallas en las
+  // que no hay una sesión en marcha: la de fin de sesión y la de "hoy no toca
+  // nada". `tope === null` significa "aún no se ha pedido al servidor, o la
+  // petición falló" — cuál de las dos es `topeCargaFallo`, más abajo.
   const [tope, setTope] = useState<number | null>(null);
   const [topeBorrador, setTopeBorrador] = useState("");
   const [topeError, setTopeError] = useState("");
@@ -232,9 +233,15 @@ export function SesionRepaso() {
   // render (incluidos los que no tienen nada que ver, como el de la barra
   // espaciadora) — se intenta una vez y, si falla, se informa con
   // `topeCargaFallo` en vez de martillear el servidor.
+  //
+  // La condición es "no hay tarjeta en curso", que cubre los dos finales: la
+  // sesión terminada y la cola que llegó vacía. Antes se descartaba
+  // explícitamente `total === 0`, y con el tope a 0 eso encerraba al usuario:
+  // la cola se vaciaba, la única pantalla con el control era la de fin de
+  // sesión —a la que ya no se podía llegar— y no hay pantalla de ajustes.
   useEffect(() => {
     if (!sesion || topeSolicitadoRef.current) return;
-    if (sesion.progreso().total === 0 || sesion.cartaActual()) return;
+    if (sesion.cartaActual()) return;
 
     topeSolicitadoRef.current = true;
     let cancelado = false;
@@ -388,22 +395,65 @@ export function SesionRepaso() {
   const { hechas, total } = sesion.progreso();
   const carta = sesion.cartaActual();
 
+  // Un solo control del tope para las dos pantallas de final (sesión
+  // terminada y cola vacía): misma validación, mismo aviso de guardado, misma
+  // recuperación si el servidor rechaza el valor. Dos copias del control
+  // acabarían divergiendo.
+  const controlTope =
+    tope !== null ? (
+      <div className="flex flex-col gap-2 border-t border-borde pt-4">
+        <Campo
+          id="tope-tarjetas-nuevas"
+          etiqueta="Tarjetas nuevas al día"
+          className="max-w-40"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={TOPE_MAXIMO_TARJETAS_NUEVAS}
+          value={topeBorrador}
+          disabled={topeGuardando}
+          onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
+            setTopeBorrador(evento.target.value)
+          }
+          onBlur={() => void confirmarTope()}
+          error={topeError}
+          ayuda={
+            topeError
+              ? undefined
+              : "Cuántas palabras nuevas quieres ver cada día. Se guarda para las próximas sesiones."
+          }
+        />
+      </div>
+    ) : topeCargaFallo ? (
+      <p style={TEXTO_1} className="border-t border-borde pt-4 text-texto-suave">
+        No se ha podido cargar el tope de tarjetas nuevas. Actualiza la página para intentarlo
+        de nuevo.
+      </p>
+    ) : null;
+
   if (total === 0) {
+    // Con el tope a 0 no entra ninguna palabra nueva, así que adelantar
+    // tampoco daría ninguna: en vez de ofrecer un botón que no puede hacer
+    // nada, se dice por qué y se deja el control del tope justo debajo.
+    const topeEnCero = tope === 0;
     return (
       <Tarjeta className="flex flex-col gap-4">
         <h1 style={TEXTO_4} className="font-semibold">
           Hoy no toca ninguna tarjeta
         </h1>
         <p style={TEXTO_2} className="text-texto-suave">
-          {adelantado
-            ? "Tampoco quedan palabras nuevas en la biblioteca. Añade más desde la pantalla de extraer."
-            : "Estás al día. Si quieres seguir, puedes adelantar palabras nuevas de la biblioteca."}
+          {topeEnCero
+            ? "Tienes el tope de tarjetas nuevas en 0, así que hoy no entra ninguna palabra nueva. Súbelo aquí abajo cuando quieras volver a aprender vocabulario nuevo."
+            : adelantado
+              ? "Tampoco quedan palabras nuevas en la biblioteca. Añade más desde la pantalla de extraer."
+              : "Estás al día. Si quieres seguir, puedes adelantar palabras nuevas de la biblioteca."}
         </p>
-        {adelantado ? null : (
+        {adelantado || topeEnCero ? null : (
           <Boton variante="primario" onClick={() => void recargar(true)}>
             Adelantar palabras nuevas
           </Boton>
         )}
+        {controlTope}
         <Boton variante="secundario" onClick={() => router.push("/biblioteca")}>
           Volver a la biblioteca
         </Boton>
@@ -466,38 +516,7 @@ export function SesionRepaso() {
           </p>
         ) : null}
 
-        {tope === null && topeCargaFallo ? (
-          <p style={TEXTO_1} className="border-t border-borde pt-4 text-texto-suave">
-            No se ha podido cargar el tope de tarjetas nuevas. Actualiza la página para
-            intentarlo de nuevo.
-          </p>
-        ) : null}
-
-        {tope !== null ? (
-          <div className="flex flex-col gap-2 border-t border-borde pt-4">
-            <Campo
-              id="tope-tarjetas-nuevas"
-              etiqueta="Tarjetas nuevas al día"
-              className="max-w-40"
-              type="number"
-              inputMode="numeric"
-              min={0}
-              max={TOPE_MAXIMO_TARJETAS_NUEVAS}
-              value={topeBorrador}
-              disabled={topeGuardando}
-              onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
-                setTopeBorrador(evento.target.value)
-              }
-              onBlur={() => void confirmarTope()}
-              error={topeError}
-              ayuda={
-                topeError
-                  ? undefined
-                  : "Cuántas palabras nuevas quieres ver cada día. Se guarda para las próximas sesiones."
-              }
-            />
-          </div>
-        ) : null}
+        {controlTope}
 
         <Boton variante="primario" onClick={() => router.push("/biblioteca")}>
           Volver a la biblioteca

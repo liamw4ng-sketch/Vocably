@@ -9,6 +9,10 @@ import { eq } from "drizzle-orm";
 let db: TestDb;
 let closeDb: () => Promise<void>;
 const AHORA = new Date("2026-09-10T09:00:00Z");
+/** El día anterior a AHORA, también en horario de trabajo (11:00 en Madrid). */
+const AYER = new Date("2026-09-09T09:00:00Z");
+/** 23:30 UTC del día 9: ya es la 1:30 del día 10 en Madrid. */
+const DE_MADRUGADA = new Date("2026-09-09T23:30:00Z");
 
 const base = {
   title: "Libro A",
@@ -28,6 +32,18 @@ function termino(n: number, type = "word") {
     context: `Frase con palabra${n}.`,
     example: `Ejemplo con palabra${n}.`,
   };
+}
+
+/** Responde "Bien" a cada carta de la cola, como haría una sesión terminada. */
+async function responder(cola: { termId: number }[], cuando: Date = AHORA) {
+  for (const carta of cola) {
+    await applyAnswer(db, {
+      answerId: `${cuando.toISOString()}-${carta.termId}`,
+      termId: carta.termId,
+      rating: 3,
+      now: cuando,
+    });
+  }
 }
 
 beforeEach(async () => {
@@ -173,20 +189,100 @@ describe("getDueQueue", () => {
     expect(carta.plazos[4]).toBe("8 días");
   });
 
-  it("adelantar añade un lote más del tope, no todo lo que queda", async () => {
-    // 10 términos nuevos disponibles, tope de 2: la cola normal se queda en 2,
-    // y adelantar debe entregar exactamente 4 (2 × tope) — ni 2 (el tope sin
-    // más) ni 10 (todo lo que queda), que es justo lo que el spec de diseño
-    // llama "otro lote", no "el resto de la biblioteca".
+  it("adelantar reparte otro lote cuando el cupo del día ya está gastado", async () => {
+    // El estado que la interfaz produce de verdad: el botón "Adelantar
+    // palabras nuevas" solo se enseña cuando la cola llega vacía, y con el
+    // cupo diario la cola llega vacía porque el cupo ya está gastado, no
+    // porque no queden palabras. Probar `adelantar` sobre una cola que aún
+    // tenía cupo (como hacía la versión anterior de esta prueba) comprueba
+    // un estado en el que el botón nunca se pulsa.
     await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
     await setNewCardsPerDay(db, 2);
 
-    const normal = await getDueQueue(db, { now: AHORA });
-    expect(normal).toHaveLength(2);
+    const primeras = await getDueQueue(db, { now: AHORA });
+    expect(primeras).toHaveLength(2);
+    await responder(primeras);
 
+    // Cupo gastado: la pantalla vacía, que es donde vive el botón.
+    expect(await getDueQueue(db, { now: AHORA })).toHaveLength(0);
+
+    // Adelantar concede OTRO LOTE del tamaño del tope sobre lo ya
+    // introducido hoy: 2, ni 0 (el cupo gastado) ni 4 (el doble de un tope
+    // que ya se gastó) ni 8 (todo lo que queda en la biblioteca).
     const adelantada = await getDueQueue(db, { now: AHORA, adelantar: true });
-    expect(adelantada).toHaveLength(4);
+    expect(adelantada).toHaveLength(2);
     expect(adelantada.every((c) => c.esNueva)).toBe(true);
+    // Y son palabras distintas de las ya introducidas.
+    const yaVistas = primeras.map((c) => c.termId);
+    expect(adelantada.some((c) => yaVistas.includes(c.termId))).toBe(false);
+  });
+
+  it("las tarjetas nuevas de hoy no se vuelven a repartir al recargar", async () => {
+    // El fallo que esta prueba existe para impedir: responder el lote del día
+    // saca esas tarjetas del estado "nueva", así que un tope aplicado sobre
+    // "las que siguen siendo nuevas" reparte otro lote entero en cada
+    // recarga, y otro, hasta agotar la biblioteca — en silencio.
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    await setNewCardsPerDay(db, 3);
+
+    const primeras = await getDueQueue(db, { now: AHORA });
+    expect(primeras).toHaveLength(3);
+    await responder(primeras);
+
+    // Mismo instante: no ha cambiado el día, el cupo sigue gastado.
+    expect(await getDueQueue(db, { now: AHORA })).toHaveLength(0);
+  });
+
+  it("una tarjeta introducida ayer no gasta el cupo de hoy", async () => {
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    await setNewCardsPerDay(db, 3);
+
+    const deAyer = await getDueQueue(db, { now: AYER });
+    expect(deAyer).toHaveLength(3);
+    await responder(deAyer, AYER);
+
+    // Hoy vuelve a haber cupo entero: tres palabras nuevas más. (Las tres de
+    // ayer vuelven además como vencidas, que es lo correcto y no cuenta.)
+    const hoy = await getDueQueue(db, { now: AHORA });
+    expect(hoy.filter((c) => c.esNueva)).toHaveLength(3);
+  });
+
+  it("el día empieza a medianoche en Madrid, no en UTC", async () => {
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    await setNewCardsPerDay(db, 3);
+
+    // 23:30 UTC del día 9 es la 1:30 de la madrugada del día 10 en Madrid:
+    // cuenta contra el cupo de HOY. Con el día calculado en UTC caería en
+    // ayer y el cupo de hoy quedaría intacto.
+    const [madrugada] = await getDueQueue(db, { now: DE_MADRUGADA });
+    await responder([madrugada], DE_MADRUGADA);
+
+    const hoy = await getDueQueue(db, { now: AHORA });
+    expect(hoy.filter((c) => c.esNueva)).toHaveLength(2);
+  });
+
+  it("lo vencido llega entero aunque el cupo de nuevas esté gastado", async () => {
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    // Tres términos maduros y vencidos desde hace días.
+    for (const termId of [1, 2, 3]) {
+      await db
+        .update(cardStates)
+        .set({ state: 2, reps: 3, due: new Date("2026-09-08T09:00:00Z") })
+        .where(eq(cardStates.termId, termId));
+    }
+    await setNewCardsPerDay(db, 2);
+
+    const primera = await getDueQueue(db, { now: AHORA });
+    expect(primera.filter((c) => !c.esNueva)).toHaveLength(3);
+    expect(primera.filter((c) => c.esNueva)).toHaveLength(2);
+
+    // Se responden solo las nuevas: el cupo del día queda gastado y las tres
+    // vencidas siguen vencidas.
+    await responder(primera.filter((c) => c.esNueva));
+
+    const segunda = await getDueQueue(db, { now: AHORA });
+    expect(segunda.filter((c) => c.esNueva)).toHaveLength(0);
+    expect(segunda).toHaveLength(3);
   });
 
   it("una tarjeta ya respondida hoy no vuelve a la cola al recargar", async () => {

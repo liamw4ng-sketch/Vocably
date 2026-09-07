@@ -54,7 +54,7 @@ describe("GET /api/repaso/cola", () => {
     expect(body.cartas[0].term).toBe("come across");
   });
 
-  it("con adelantar=1 entrega un lote más del tope, no todo lo que queda", async () => {
+  it("con adelantar=1 entrega otro lote cuando el cupo del día ya está gastado", async () => {
     // El beforeEach ya guardó un término ("come across"); se añaden más para
     // tener 10 nuevas disponibles en total con las que distinguir un lote
     // fijo de "todo lo que queda".
@@ -77,10 +77,21 @@ describe("GET /api/repaso/cola", () => {
     await setNewCardsPerDay(db, 2);
 
     const normal = await GET(new Request("http://localhost/api/repaso/cola"));
-    expect((await normal.json()).cartas).toHaveLength(2);
+    const cartas = (await normal.json()).cartas as { termId: number }[];
+    expect(cartas).toHaveLength(2);
+
+    // Se responden las dos: el cupo del día queda gastado y la cola llega
+    // vacía, que es el único estado en el que la interfaz enseña el botón de
+    // adelantar. La ruta deriva `now` del servidor, así que las respuestas
+    // cuentan contra el día de hoy sin que el cliente mande ninguna fecha.
+    for (const carta of cartas) {
+      await POST(post({ answerId: `a${carta.termId}`, termId: carta.termId, rating: 3 }));
+    }
+    const vacia = await GET(new Request("http://localhost/api/repaso/cola"));
+    expect((await vacia.json()).cartas).toHaveLength(0);
 
     const adelantada = await GET(new Request("http://localhost/api/repaso/cola?adelantar=1"));
-    expect((await adelantada.json()).cartas).toHaveLength(4);
+    expect((await adelantada.json()).cartas).toHaveLength(2);
   });
 
   it("acepta filtros por tipo", async () => {
