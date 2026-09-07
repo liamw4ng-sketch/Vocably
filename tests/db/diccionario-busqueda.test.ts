@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createTestDb } from "@/tests/helpers/test-db";
 import { buscarEnDiccionario, buscarEnBiblioteca } from "@/db/repository/diccionario";
 import { saveExtraction } from "@/db/repository/extraction";
-import { dictionaryEntries } from "@/db/schema";
+import { cardStates, dictionaryEntries } from "@/db/schema";
 
 async function sembrar(db: Parameters<typeof buscarEnDiccionario>[0]) {
   await db.insert(dictionaryEntries).values([
@@ -72,6 +72,38 @@ describe("buscarEnBiblioteca", () => {
     expect(guardados[0].translation).toBe("encontrarse con");
     expect(guardados[0].level).toBe("B2");
     expect(guardados[0].senseHint).toBe("");
+    await close();
+  });
+
+  it("trae cuándo toca repasar cada término guardado", async () => {
+    const { db, close } = await createTestDb();
+    await saveExtraction(db, {
+      title: "Libro",
+      pageStart: 1,
+      pageEnd: 5,
+      level: "B2",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      items: [
+        {
+          term: "reluctant",
+          type: "word",
+          translation: "reacio",
+          context: "She was reluctant to answer.",
+          example: "He is reluctant to leave.",
+        },
+      ],
+    });
+
+    // Una fecha futura conocida: si la búsqueda no uniera `card_states`, el
+    // campo llegaría vacío o con la fecha de creación, no con esta.
+    const manana = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await db.update(cardStates).set({ due: manana });
+
+    const [guardado] = await buscarEnBiblioteca(db, "reluctant");
+    expect(guardado.due).toBeInstanceOf(Date);
+    expect(guardado.due.getTime()).toBe(manana.getTime());
     await close();
   });
 

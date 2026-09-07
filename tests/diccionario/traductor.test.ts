@@ -36,4 +36,29 @@ describe("crearTraductorMyMemory", () => {
     const fetchFalso = vi.fn(async () => new Response("nope", { status: 503 }));
     expect(await crearTraductorMyMemory(fetchFalso as unknown as typeof fetch)("reluctant")).toEqual([]);
   });
+
+  it("manda un plazo: la petición lleva su AbortSignal", async () => {
+    const fetchFalso = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(respuestaOk)));
+    await crearTraductorMyMemory(fetchFalso as unknown as typeof fetch)("reluctant");
+
+    const opciones = fetchFalso.mock.calls[0][1];
+    expect(opciones?.signal).toBeInstanceOf(AbortSignal);
+    expect(opciones?.signal?.aborted).toBe(false);
+  });
+
+  it("un servicio colgado se corta solo y devuelve vacío en vez de esperar para siempre", async () => {
+    // No se cae: se queda callado. Sin plazo, esta promesa no se resolvería
+    // nunca y la búsqueda entera se quedaría esperando con ella.
+    const fetchColgado = vi.fn<typeof fetch>(
+      (_url, init) =>
+        new Promise((_resolver, rechazar) => {
+          init?.signal?.addEventListener("abort", () =>
+            rechazar(new DOMException("The operation was aborted.", "AbortError")),
+          );
+        }),
+    );
+
+    const traductor = crearTraductorMyMemory(fetchColgado as unknown as typeof fetch, 20);
+    expect(await traductor("reluctant")).toEqual([]);
+  });
 });

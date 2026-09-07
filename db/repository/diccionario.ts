@@ -64,6 +64,12 @@ export type TerminoGuardado = {
   translation: string;
   level: string;
   senseHint: string;
+  /**
+   * Cuándo toca repasarlo. La especificación (§3) pide enseñarlo junto a la
+   * traducción guardada: saber que una palabra ya está no dice nada si no se
+   * sabe cuándo vuelve.
+   */
+  due: Date;
 };
 
 /**
@@ -94,41 +100,53 @@ export async function buscarEnDiccionario(
 }
 
 /**
- * Rellena el español que falte y lo guarda. Una palabra se traduce **una vez en
- * la vida**: es lo que hace que caerse el servicio ajeno sea un problema
- * pequeño en vez de una función rota.
+ * Rellena el español que falte y, cuando el dato es de verdad de esa acepción,
+ * lo guarda. Todas las acepciones vienen de una misma búsqueda, así que
+ * comparten término: se llama al traductor **una sola vez**.
+ *
+ * **Solo se cachea si hay exactamente una acepción sin español.** No es un
+ * olvido, es la parte importante: el traductor recibe el término suelto —así
+ * lo pide la especificación §8, porque mandarlo pegado a su definición rompe
+ * la traducción— y su respuesta es la del término, no la de una acepción
+ * concreta. Con varias acepciones sin español, escribir "banco" en las siete
+ * entradas de *bank* dejaría la de orilla mal traducida y marcada como
+ * cacheada, y una fila cacheada no se reintenta nunca: la única salida sería
+ * el botón que cuesta dinero. Con una sola acepción no hay ambigüedad posible,
+ * y ahí sí se guarda para no volver a preguntar. Mostrarlo sin guardarlo no
+ * cuesta nada: MyMemory es gratis y se le puede volver a preguntar mañana.
  */
 export async function traducirSiFalta(
   db: Database,
   acepciones: AcepcionDiccionario[],
   traductor: Traductor,
 ): Promise<AcepcionDiccionario[]> {
-  // Un término puede tener varias acepciones sin español; se traduce el término
-  // una sola vez y el resultado sirve para todas.
-  const cache = new Map<string, string[]>();
+  const sinEspanol = acepciones.filter((a) => a.translations.length === 0);
+  if (sinEspanol.length === 0) return acepciones;
 
-  const resultado: AcepcionDiccionario[] = [];
-  for (const acepcion of acepciones) {
-    if (acepcion.translations.length > 0) {
-      resultado.push(acepcion);
-      continue;
-    }
-    const clave = acepcion.term.toLowerCase();
-    const traducciones = cache.get(clave) ?? (await traductor(acepcion.term));
-    cache.set(clave, traducciones);
+  const traducciones = await traductor(sinEspanol[0].term);
+  if (traducciones.length === 0) return acepciones;
 
-    if (traducciones.length > 0) {
-      await db
-        .update(dictionaryEntries)
-        .set({ translations: traducciones, translationSource: "mymemory" })
-        .where(eq(dictionaryEntries.id, acepcion.id));
-    }
-    resultado.push({ ...acepcion, translations: traducciones });
+  if (sinEspanol.length === 1) {
+    // Una sola escritura, no una por acepción.
+    await db
+      .update(dictionaryEntries)
+      .set({ translations: traducciones, translationSource: "mymemory" })
+      .where(eq(dictionaryEntries.id, sinEspanol[0].id));
   }
-  return resultado;
+
+  return acepciones.map((a) =>
+    a.translations.length === 0 ? { ...a, translations: traducciones } : a,
+  );
 }
 
-/** Lo que el usuario ya tiene guardado de ese término, con todas sus acepciones. */
+/**
+ * Lo que el usuario ya tiene guardado de ese término, con todas sus acepciones
+ * y con la fecha del próximo repaso.
+ *
+ * El `innerJoin` con `card_states` es seguro: cada término gana su ficha en la
+ * misma transacción que lo crea, tanto al extraer de un PDF como al añadir
+ * desde el diccionario, así que un término sin ficha no existe.
+ */
 export async function buscarEnBiblioteca(
   db: Database,
   termino: string,
@@ -140,8 +158,10 @@ export async function buscarEnBiblioteca(
       translation: terms.translation,
       level: terms.level,
       senseHint: terms.senseHint,
+      due: cardStates.due,
     })
     .from(terms)
+    .innerJoin(cardStates, eq(cardStates.termId, terms.id))
     .where(inArray(terms.termNormalized, variantesDelLema(termino)))
     .orderBy(terms.id);
 }
