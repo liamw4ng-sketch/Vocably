@@ -5,12 +5,14 @@ export default function BibliotecaPage() {
   return (
     <main className="mx-auto flex max-w-xl flex-col gap-6 p-6">
       <header className="flex items-baseline justify-between gap-4">
-        <h1 className="text-2xl font-semibold">Biblioteca</h1>
+        <h1 style={{ fontSize: "var(--tamano-4)" }} className="font-semibold text-texto">
+          Biblioteca
+        </h1>
         <nav className="flex items-baseline gap-4">
           <Link href="/repaso" className="inline-flex min-h-12 items-center underline">
             Repaso
           </Link>
-          <Link href="/extraer" className="underline">
+          <Link href="/extraer" className="inline-flex min-h-12 items-center underline">
             Extraer
           </Link>
         </nav>
