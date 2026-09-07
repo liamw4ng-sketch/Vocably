@@ -1,10 +1,11 @@
 import { and, eq, asc, gte, count, type SQL } from "drizzle-orm";
 import { terms, termOccurrences, cardStates, sources, reviewLogs } from "@/db/schema";
-import { getNewCardsPerDay } from "@/db/repository/settings";
+import { getAjustes } from "@/db/repository/settings";
 import type { Database } from "@/db/types";
 import { State, fsrs, type Grade } from "ts-fsrs";
 import { toFsrsCard, fromFsrsCard } from "@/lib/fsrs";
 import { inicioDelDia } from "@/lib/dia";
+import { barajar } from "@/lib/barajar";
 
 const programador = fsrs();
 
@@ -51,6 +52,19 @@ export type OpcionesCola = {
   type?: string;
   /** Acción explícita del usuario: introducir tarjetas nuevas por encima del tope del día. */
   adelantar?: boolean;
+  /** Fuente de azar del sorteo de repasos. Se inyecta solo en las pruebas. */
+  aleatorio?: () => number;
+};
+
+export type Cola = {
+  cartas: CartaCola[];
+  /**
+   * Repasos que vencían hoy y que el límite por sesión dejó fuera. No se han
+   * perdido: siguen vencidos y entran en la sesión siguiente. La pantalla lo
+   * dice, porque un límite por debajo del ritmo diario acumula atrasos en
+   * silencio hasta que la cola es impagable.
+   */
+  repasosFuera: number;
 };
 
 /**
@@ -75,8 +89,17 @@ async function introducidasHoy(db: Database, ahora: Date): Promise<number> {
 }
 
 /**
- * La cola del día: todo lo vencido, más tarjetas nuevas hasta el tope diario.
- * Lo vencido nunca se recorta: el tope solo limita la entrada de material nuevo.
+ * La cola del día, en tres grupos:
+ *
+ *  - **En curso** (aprendizaje o reaprendizaje): palabras falladas hace
+ *    minutos. Van siempre enteras y nunca entran en el sorteo.
+ *  - **Aprendidas** vencidas: si hay más de las que caben en la sesión, se
+ *    sortean. Las que quedan fuera siguen vencidas para la próxima.
+ *  - **Nuevas**: hasta el cupo que quede del tope diario.
+ *
+ * El sorteo solo actúa cuando hay que elegir. Si caben todas, el orden no se
+ * toca: introducir azar donde no hay decisión que tomar solo haría las
+ * sesiones irreproducibles sin ganar nada.
  *
  * Un término puede tener varias apariciones (se encontró en más de una
  * fuente), así que la consulta agrupa en JavaScript por `termId` y se queda
@@ -86,7 +109,7 @@ async function introducidasHoy(db: Database, ahora: Date): Promise<number> {
  * `termOccurrences.id`, qué aparición sobrevive dependería del plan de
  * consulta, no de cuál se guardó antes.
  */
-export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<CartaCola[]> {
+export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Cola> {
   const filtros: SQL[] = [];
   if (opts.type) filtros.push(eq(terms.type, opts.type));
   if (opts.source) filtros.push(eq(sources.title, opts.source));
@@ -120,7 +143,8 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Car
 
   const vistos = new Set<number>();
   const nuevas: CartaCola[] = [];
-  const vencidas: CartaCola[] = [];
+  const enCurso: CartaCola[] = [];
+  const aprendidas: CartaCola[] = [];
 
   for (const f of filas) {
     if (vistos.has(f.termId)) continue;
@@ -144,7 +168,10 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Car
       },
     };
     if (carta.esNueva) nuevas.push(carta);
-    else if (f.due <= opts.now) vencidas.push(carta);
+    else if (f.due <= opts.now) {
+      if (f.state === State.Review) aprendidas.push(carta);
+      else enCurso.push(carta);
+    }
   }
 
   // El tope es DIARIO: lo que queda de cupo es el tope menos lo que ya se ha
@@ -158,11 +185,22 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Car
   // enseña el botón— ni todo lo que quede en la biblioteca: el spec de diseño
   // dice "otro lote", y un tope diario que un botón se salta sin límite deja
   // de ser un tope.
-  const tope = await getNewCardsPerDay(db);
+  const { newCardsPerDay: tope, reviewsPerSession: limiteRepasos } = await getAjustes(db);
   const limiteNuevas = opts.adelantar
     ? tope
     : Math.max(0, tope - (await introducidasHoy(db, opts.now)));
-  return [...vencidas, ...nuevas.slice(0, limiteNuevas)];
+
+  // 0 significa "todos los que venzan": la app no recorta el repaso por su
+  // cuenta, solo si el usuario ha pedido un tamaño de sesión.
+  const hayQueElegir = limiteRepasos > 0 && aprendidas.length > limiteRepasos;
+  const repasos = hayQueElegir
+    ? barajar(aprendidas, opts.aleatorio).slice(0, limiteRepasos)
+    : aprendidas;
+
+  return {
+    cartas: [...enCurso, ...repasos, ...nuevas.slice(0, limiteNuevas)],
+    repasosFuera: aprendidas.length - repasos.length,
+  };
 }
 
 export type EntradaRespuesta = {

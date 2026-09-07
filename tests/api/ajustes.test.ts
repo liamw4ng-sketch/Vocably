@@ -62,4 +62,39 @@ describe("/api/ajustes", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("devuelve los repasos por sesión, 0 (sin límite) por defecto", async () => {
+    expect((await (await GET()).json()).reviewsPerSession).toBe(0);
+  });
+
+  it("cambia los repasos por sesión y los persiste", async () => {
+    expect((await PATCH(patch({ reviewsPerSession: 30 }))).status).toBe(200);
+    expect((await (await GET()).json()).reviewsPerSession).toBe(30);
+  });
+
+  it("cambiar un ajuste no pisa el otro", async () => {
+    await PATCH(patch({ newCardsPerDay: 7 }));
+    await PATCH(patch({ reviewsPerSession: 30 }));
+    const body = await (await GET()).json();
+    expect(body).toMatchObject({ newCardsPerDay: 7, reviewsPerSession: 30 });
+  });
+
+  it("acepta los dos ajustes en la misma petición", async () => {
+    expect((await PATCH(patch({ newCardsPerDay: 3, reviewsPerSession: 12 }))).status).toBe(200);
+    const body = await (await GET()).json();
+    expect(body).toMatchObject({ newCardsPerDay: 3, reviewsPerSession: 12 });
+  });
+
+  it("rechaza unos repasos por sesión no enteros, negativos o absurdos", async () => {
+    expect((await PATCH(patch({ reviewsPerSession: 0.5 }))).status).toBe(400);
+    expect((await PATCH(patch({ reviewsPerSession: -1 }))).status).toBe(400);
+    expect((await PATCH(patch({ reviewsPerSession: 9999 }))).status).toBe(400);
+  });
+
+  it("rechaza un cuerpo que no trae ningún ajuste", async () => {
+    // Sin esto, un error de nombre en el cliente devolvería 200 y no
+    // guardaría nada: el usuario vería el campo aceptado y el valor perdido.
+    expect((await PATCH(patch({}))).status).toBe(400);
+    expect((await PATCH(patch({ topeDiario: 5 }))).status).toBe(400);
+  });
 });

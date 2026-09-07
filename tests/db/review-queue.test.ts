@@ -1,8 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
-import { setNewCardsPerDay } from "@/db/repository/settings";
-import { getDueQueue, formatearPlazo, applyAnswer } from "@/db/repository/review";
+import { setNewCardsPerDay, setReviewsPerSession } from "@/db/repository/settings";
+import {
+  getDueQueue,
+  formatearPlazo,
+  applyAnswer,
+  type OpcionesCola,
+} from "@/db/repository/review";
 import { cardStates } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -34,6 +39,37 @@ function termino(n: number, type = "word") {
   };
 }
 
+/** Deja esos términos como palabras ya aprendidas y vencidas desde hace días. */
+async function madurar(termIds: number[], due = new Date("2026-09-08T09:00:00Z")) {
+  for (const termId of termIds) {
+    await db.update(cardStates).set({ state: 2, reps: 3, due }).where(eq(cardStates.termId, termId));
+  }
+}
+
+/** Deja esos términos en aprendizaje (fallados hace poco) y ya vencidos. */
+async function enAprendizaje(termIds: number[]) {
+  for (const termId of termIds) {
+    await db
+      .update(cardStates)
+      .set({ state: 1, reps: 1, due: new Date("2026-09-10T08:50:00Z") })
+      .where(eq(cardStates.termId, termId));
+  }
+}
+
+/** Pseudoaleatorio determinista: la misma semilla da siempre el mismo sorteo. */
+function generador(semilla: number): () => number {
+  let x = semilla;
+  return () => {
+    x = (x * 1103515245 + 12345) % 2147483648;
+    return x / 2147483648;
+  };
+}
+
+/** Atajo: casi todas las pruebas solo miran las cartas, no el recuento de las que quedan fuera. */
+async function cartasDe(opts: OpcionesCola) {
+  return (await getDueQueue(db, opts)).cartas;
+}
+
 /** Responde "Bien" a cada carta de la cola, como haría una sesión terminada. */
 async function responder(cola: { termId: number }[], cuando: Date = AHORA) {
   for (const carta of cola) {
@@ -60,7 +96,7 @@ describe("getDueQueue", () => {
     await saveExtraction(db, { ...base, items: Array.from({ length: 30 }, (_, i) => termino(i)) });
     await setNewCardsPerDay(db, 20);
 
-    const cola = await getDueQueue(db, { now: AHORA });
+    const cola = await cartasDe({ now: AHORA });
     expect(cola).toHaveLength(20);
     expect(cola.every((c) => c.esNueva)).toBe(true);
   });
@@ -74,7 +110,7 @@ describe("getDueQueue", () => {
       .set({ state: 2, reps: 3, due: new Date("2026-09-09T09:00:00Z") })
       .where(eq(cardStates.termId, 1));
 
-    const cola = await getDueQueue(db, { now: AHORA });
+    const cola = await cartasDe({ now: AHORA });
     expect(cola.filter((c) => !c.esNueva)).toHaveLength(1);
     expect(cola.filter((c) => c.esNueva)).toHaveLength(1);
   });
@@ -86,7 +122,7 @@ describe("getDueQueue", () => {
       .set({ state: 2, reps: 3, due: new Date("2026-12-01T00:00:00Z") })
       .where(eq(cardStates.termId, 1));
 
-    expect(await getDueQueue(db, { now: AHORA })).toHaveLength(0);
+    expect(await cartasDe({ now: AHORA })).toHaveLength(0);
   });
 
   it("filtra por tipo de término", async () => {
@@ -94,7 +130,7 @@ describe("getDueQueue", () => {
       ...base,
       items: [termino(1, "word"), termino(2, "phrasal_verb")],
     });
-    const cola = await getDueQueue(db, { now: AHORA, type: "phrasal_verb" });
+    const cola = await cartasDe({ now: AHORA, type: "phrasal_verb" });
     expect(cola).toHaveLength(1);
     expect(cola[0].term).toBe("palabra2");
   });
@@ -103,14 +139,14 @@ describe("getDueQueue", () => {
     await saveExtraction(db, { ...base, items: [termino(1)] });
     await saveExtraction(db, { ...base, title: "Libro B", items: [termino(2)] });
 
-    const cola = await getDueQueue(db, { now: AHORA, source: "Libro B" });
+    const cola = await cartasDe({ now: AHORA, source: "Libro B" });
     expect(cola).toHaveLength(1);
     expect(cola[0].term).toBe("palabra2");
   });
 
   it("trae el contexto y el ejemplo de cada término", async () => {
     await saveExtraction(db, { ...base, items: [termino(1)] });
-    const [carta] = await getDueQueue(db, { now: AHORA });
+    const [carta] = await cartasDe({ now: AHORA });
     expect(carta.context).toBe("Frase con palabra1.");
     expect(carta.example).toBe("Ejemplo con palabra1.");
     expect(carta.translation).toBe("traducción1");
@@ -157,7 +193,7 @@ describe("getDueQueue", () => {
     });
     await setNewCardsPerDay(db, 200); // que el tope no recorte el relleno
 
-    const cola = await getDueQueue(db, { now: AHORA });
+    const cola = await cartasDe({ now: AHORA });
     const entradas = cola.filter((c) => c.term === "palabra1");
 
     // Una sola entrada en la cola pese a las dos apariciones.
@@ -169,12 +205,12 @@ describe("getDueQueue", () => {
   });
 
   it("con la biblioteca vacía devuelve una cola vacía", async () => {
-    expect(await getDueQueue(db, { now: AHORA })).toEqual([]);
+    expect(await cartasDe({ now: AHORA })).toEqual([]);
   });
 
   it("trae los cuatro plazos, y el de Fácil es más lejano que el de Otra vez", async () => {
     await saveExtraction(db, { ...base, items: [termino(1)] });
-    const [carta] = await getDueQueue(db, { now: AHORA });
+    const [carta] = await cartasDe({ now: AHORA });
 
     expect(Object.keys(carta.plazos).sort()).toEqual(["1", "2", "3", "4"]);
     for (const p of Object.values(carta.plazos)) expect(p).toMatch(/\S/);
@@ -199,17 +235,17 @@ describe("getDueQueue", () => {
     await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
     await setNewCardsPerDay(db, 2);
 
-    const primeras = await getDueQueue(db, { now: AHORA });
+    const primeras = await cartasDe({ now: AHORA });
     expect(primeras).toHaveLength(2);
     await responder(primeras);
 
     // Cupo gastado: la pantalla vacía, que es donde vive el botón.
-    expect(await getDueQueue(db, { now: AHORA })).toHaveLength(0);
+    expect(await cartasDe({ now: AHORA })).toHaveLength(0);
 
     // Adelantar concede OTRO LOTE del tamaño del tope sobre lo ya
     // introducido hoy: 2, ni 0 (el cupo gastado) ni 4 (el doble de un tope
     // que ya se gastó) ni 8 (todo lo que queda en la biblioteca).
-    const adelantada = await getDueQueue(db, { now: AHORA, adelantar: true });
+    const adelantada = await cartasDe({ now: AHORA, adelantar: true });
     expect(adelantada).toHaveLength(2);
     expect(adelantada.every((c) => c.esNueva)).toBe(true);
     // Y son palabras distintas de las ya introducidas.
@@ -225,25 +261,25 @@ describe("getDueQueue", () => {
     await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
     await setNewCardsPerDay(db, 3);
 
-    const primeras = await getDueQueue(db, { now: AHORA });
+    const primeras = await cartasDe({ now: AHORA });
     expect(primeras).toHaveLength(3);
     await responder(primeras);
 
     // Mismo instante: no ha cambiado el día, el cupo sigue gastado.
-    expect(await getDueQueue(db, { now: AHORA })).toHaveLength(0);
+    expect(await cartasDe({ now: AHORA })).toHaveLength(0);
   });
 
   it("una tarjeta introducida ayer no gasta el cupo de hoy", async () => {
     await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
     await setNewCardsPerDay(db, 3);
 
-    const deAyer = await getDueQueue(db, { now: AYER });
+    const deAyer = await cartasDe({ now: AYER });
     expect(deAyer).toHaveLength(3);
     await responder(deAyer, AYER);
 
     // Hoy vuelve a haber cupo entero: tres palabras nuevas más. (Las tres de
     // ayer vuelven además como vencidas, que es lo correcto y no cuenta.)
-    const hoy = await getDueQueue(db, { now: AHORA });
+    const hoy = await cartasDe({ now: AHORA });
     expect(hoy.filter((c) => c.esNueva)).toHaveLength(3);
   });
 
@@ -254,10 +290,10 @@ describe("getDueQueue", () => {
     // 23:30 UTC del día 9 es la 1:30 de la madrugada del día 10 en Madrid:
     // cuenta contra el cupo de HOY. Con el día calculado en UTC caería en
     // ayer y el cupo de hoy quedaría intacto.
-    const [madrugada] = await getDueQueue(db, { now: DE_MADRUGADA });
+    const [madrugada] = await cartasDe({ now: DE_MADRUGADA });
     await responder([madrugada], DE_MADRUGADA);
 
-    const hoy = await getDueQueue(db, { now: AHORA });
+    const hoy = await cartasDe({ now: AHORA });
     expect(hoy.filter((c) => c.esNueva)).toHaveLength(2);
   });
 
@@ -272,7 +308,7 @@ describe("getDueQueue", () => {
     }
     await setNewCardsPerDay(db, 2);
 
-    const primera = await getDueQueue(db, { now: AHORA });
+    const primera = await cartasDe({ now: AHORA });
     expect(primera.filter((c) => !c.esNueva)).toHaveLength(3);
     expect(primera.filter((c) => c.esNueva)).toHaveLength(2);
 
@@ -280,19 +316,108 @@ describe("getDueQueue", () => {
     // vencidas siguen vencidas.
     await responder(primera.filter((c) => c.esNueva));
 
-    const segunda = await getDueQueue(db, { now: AHORA });
+    const segunda = await cartasDe({ now: AHORA });
     expect(segunda.filter((c) => c.esNueva)).toHaveLength(0);
     expect(segunda).toHaveLength(3);
   });
 
   it("una tarjeta ya respondida hoy no vuelve a la cola al recargar", async () => {
     await saveExtraction(db, { ...base, items: [termino(1), termino(2)] });
-    expect(await getDueQueue(db, { now: AHORA })).toHaveLength(2);
+    expect(await cartasDe({ now: AHORA })).toHaveLength(2);
 
     await applyAnswer(db, { answerId: "r1", termId: 1, rating: 3, now: AHORA });
 
-    const cola = await getDueQueue(db, { now: AHORA });
+    const cola = await cartasDe({ now: AHORA });
     expect(cola.map((c) => c.termId)).toEqual([2]);
+  });
+
+  it("con los repasos por sesión a 0 no se recorta nada", async () => {
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    await madurar([1, 2, 3, 4, 5, 6, 7, 8]);
+    await setNewCardsPerDay(db, 0);
+
+    const { cartas, repasosFuera } = await getDueQueue(db, { now: AHORA });
+    expect(cartas).toHaveLength(8);
+    expect(repasosFuera).toBe(0);
+  });
+
+  it("recorta los repasos al número pedido y dice cuántos quedan fuera", async () => {
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    await madurar([1, 2, 3, 4, 5, 6, 7, 8]);
+    await setNewCardsPerDay(db, 0);
+    await setReviewsPerSession(db, 3);
+
+    const { cartas, repasosFuera } = await getDueQueue(db, { now: AHORA, aleatorio: generador(1) });
+    expect(cartas).toHaveLength(3);
+    expect(repasosFuera).toBe(5);
+  });
+
+  it("las que quedan fuera siguen vencidas y salen en la sesión siguiente", async () => {
+    // El recorte reparte el trabajo, no lo tira: es la diferencia entre un
+    // límite por sesión y perder repasos.
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    await madurar([1, 2, 3, 4, 5, 6]);
+    await setNewCardsPerDay(db, 0);
+    await setReviewsPerSession(db, 2);
+
+    const primera = (await getDueQueue(db, { now: AHORA, aleatorio: generador(1) })).cartas;
+    expect(primera).toHaveLength(2);
+    await responder(primera);
+
+    const segunda = (await getDueQueue(db, { now: AHORA, aleatorio: generador(2) })).cartas;
+    expect(segunda).toHaveLength(2);
+    const yaVistas = primera.map((c) => c.termId);
+    expect(segunda.some((c) => yaVistas.includes(c.termId))).toBe(false);
+  });
+
+  it("las palabras que estás repitiendo no entran en el sorteo ni se recortan", async () => {
+    // Una palabra en aprendizaje o reaprendizaje es una que acabas de fallar
+    // y que el programa quiere volver a preguntarte en minutos. Dejarla fuera
+    // por el límite es lo único que sí rompería la repetición espaciada.
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    await madurar([1, 2, 3, 4, 5]);
+    await enAprendizaje([6, 7]);
+    await setNewCardsPerDay(db, 0);
+    await setReviewsPerSession(db, 2);
+
+    for (const semilla of [1, 2, 3, 4, 5]) {
+      const { cartas, repasosFuera } = await getDueQueue(db, {
+        now: AHORA,
+        aleatorio: generador(semilla),
+      });
+      expect(cartas).toHaveLength(4);
+      expect(cartas.map((c) => c.termId)).toEqual(expect.arrayContaining([6, 7]));
+      // El recuento de las que quedan fuera cuenta solo aprendidas: 5 - 2.
+      expect(repasosFuera).toBe(3);
+    }
+  });
+
+  it("el sorteo puede elegir a cualquiera de las vencidas", async () => {
+    // Sin esto, un recorte que siempre se quedara con las primeras por id
+    // pasaría todas las pruebas de arriba, y el usuario repasaría siempre las
+    // mismas tres palabras mientras las demás envejecen.
+    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
+    await madurar([1, 2, 3, 4, 5, 6, 7, 8]);
+    await setNewCardsPerDay(db, 0);
+    await setReviewsPerSession(db, 3);
+
+    const elegidas = new Set<number>();
+    for (let semilla = 1; semilla <= 40; semilla++) {
+      const { cartas } = await getDueQueue(db, { now: AHORA, aleatorio: generador(semilla) });
+      for (const carta of cartas) elegidas.add(carta.termId);
+    }
+    expect([...elegidas].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it("el límite de repasos no toca el cupo de palabras nuevas", async () => {
+    await saveExtraction(db, { ...base, items: Array.from({ length: 20 }, (_, i) => termino(i)) });
+    await madurar([1, 2, 3, 4, 5, 6, 7, 8]);
+    await setNewCardsPerDay(db, 5);
+    await setReviewsPerSession(db, 2);
+
+    const { cartas } = await getDueQueue(db, { now: AHORA, aleatorio: generador(1) });
+    expect(cartas.filter((c) => c.esNueva)).toHaveLength(5);
+    expect(cartas.filter((c) => !c.esNueva)).toHaveLength(2);
   });
 });
 

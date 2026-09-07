@@ -1,0 +1,1 @@
+ALTER TABLE "settings" ADD COLUMN "reviews_per_session" integer DEFAULT 0 NOT NULL;

@@ -15,3 +15,8 @@
  * `app/api/ajustes/route.ts` y lo usa como límite del control del cliente
  * en `components/SesionRepaso.tsx` — una sola fuente para los dos. */
 export const TOPE_MAXIMO_TARJETAS_NUEVAS = 200;
+
+/** Tope máximo de repasos por sesión, con el mismo criterio: por encima de
+ * esto ya no es una preferencia, es un error de digitación. 0 significa
+ * "todos los que venzan", que es el valor por defecto. */
+export const MAXIMO_REPASOS_POR_SESION = 500;
