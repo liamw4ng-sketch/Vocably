@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CEFR_LEVELS } from "@/lib/extraction-schema";
+import { formatearPlazo } from "@/lib/plazo";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
 import { Tarjeta } from "@/components/ui/Tarjeta";
@@ -16,9 +17,22 @@ type Acepcion = {
   yaGuardada: boolean;
 };
 
+/**
+ * Lo que ya está en la biblioteca. `due` llega como texto: la respuesta pasa
+ * por JSON y ahí una fecha es una cadena ISO, no un `Date`.
+ */
+type TerminoGuardado = {
+  id: number;
+  term: string;
+  translation: string;
+  level: string;
+  senseHint: string;
+  due: string;
+};
+
 type Resultado = {
   termino: string;
-  enBiblioteca: { id: number; term: string; translation: string; level: string; senseHint: string }[];
+  enBiblioteca: TerminoGuardado[];
   acepciones: Acepcion[];
 };
 
@@ -75,6 +89,20 @@ export async function anadirAcepcion(
 }
 
 /**
+ * La traducción que se guarda: manda lo escrito a mano y, si no hay nada
+ * escrito, lo que trajo el traductor.
+ *
+ * Existe porque el traductor gratuito puede caerse o devolver vacío, y sin
+ * esto la única salida sería el botón que cuesta dinero. El criterio de la
+ * usuaria es que el diccionario funcione gratis; afinar con IA es un extra
+ * que se pulsa, no un peaje.
+ */
+export function acepcionConTraduccion(acepcion: Acepcion, traduccionManual: string): Acepcion {
+  const escrita = traduccionManual.trim();
+  return escrita ? { ...acepcion, translations: [escrita] } : acepcion;
+}
+
+/**
  * Si el botón "Añadir" debe estar deshabilitado: sin nivel elegido, sin
  * traducción al español, o con la petición de esta tarjeta ya en vuelo —esto
  * último evita el doble clic que mandaría dos `POST /api/terms` antes de que
@@ -86,8 +114,36 @@ export function botonAnadirDeshabilitado(
   nivel: string,
   numTraducciones: number,
   enCurso: boolean,
+  traduccionManual = "",
 ): boolean {
-  return !nivel || numTraducciones === 0 || enCurso;
+  return !nivel || (numTraducciones === 0 && !traduccionManual.trim()) || enCurso;
+}
+
+/**
+ * Cuándo vuelve a tocar una palabra que ya está en el repaso, con el mismo
+ * castellano que los botones de la sesión: se reutiliza `formatearPlazo` en
+ * vez de inventar un segundo formato de fecha para la misma idea.
+ */
+export function cuandoTocaRepasar(due: string, ahora: Date = new Date()): string {
+  const fecha = new Date(due);
+  if (Number.isNaN(fecha.getTime())) return "sin fecha de repaso";
+  const plazo = formatearPlazo(ahora, fecha);
+  // `formatearPlazo` dice "ahora" tanto para lo que vence en un minuto como
+  // para lo que lleva vencido tres días: en las dos, lo honesto es "toca ya".
+  return plazo === "ahora" ? "toca ahora" : `toca en ${plazo}`;
+}
+
+/**
+ * Qué avisar cuando la búsqueda no trae ninguna acepción. Decir "no está en el
+ * diccionario" de una palabra que la usuaria tiene guardada es falso: lo que
+ * pasa es que Wikcionario no la trae, no que no la tenga.
+ */
+export function avisoSinAcepciones(
+  numAcepciones: number,
+  numEnBiblioteca: number,
+): "no-esta" | "solo-en-biblioteca" | null {
+  if (numAcepciones > 0) return null;
+  return numEnBiblioteca > 0 ? "solo-en-biblioteca" : "no-esta";
 }
 
 /**
@@ -120,6 +176,10 @@ export function BuscadorDiccionario() {
   const [buscando, setBuscando] = useState(false);
   const [error, setError] = useState("");
   const [niveles, setNiveles] = useState<Record<number, string>>({});
+  // La traducción escrita a mano, por acepción. Es la salida gratuita cuando
+  // el traductor no responde: sin ella, la palabra no se podría añadir salvo
+  // pagando por afinar con IA.
+  const [traduccionesManuales, setTraduccionesManuales] = useState<Record<number, string>>({});
   const [guardadas, setGuardadas] = useState<Set<number>>(new Set());
   // Por acepción, no global: hay varias tarjetas en pantalla a la vez y
   // bloquear todas mientras se guarda una sería peor que el bug que arregla.
@@ -153,7 +213,10 @@ export function BuscadorDiccionario() {
     setError("");
     setGuardandoIds((previas) => new Set(previas).add(acepcion.id));
     try {
-      await anadirAcepcion(acepcion, niveles[acepcion.id] ?? "");
+      await anadirAcepcion(
+        acepcionConTraduccion(acepcion, traduccionesManuales[acepcion.id] ?? ""),
+        niveles[acepcion.id] ?? "",
+      );
       setGuardadas((previas) => new Set(previas).add(acepcion.id));
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo añadir.");
@@ -195,6 +258,10 @@ export function BuscadorDiccionario() {
     }
   }
 
+  const aviso = resultado
+    ? avisoSinAcepciones(resultado.acepciones.length, resultado.enBiblioteca.length)
+    : null;
+
   return (
     <div className="flex flex-col gap-6">
       <form onSubmit={buscar} className="flex items-end gap-3">
@@ -216,10 +283,44 @@ export function BuscadorDiccionario() {
         </p>
       )}
 
-      {resultado && resultado.acepciones.length === 0 && (
+      {/* Lo que ya está guardado va primero: si la palabra ya está en el
+          repaso, eso es la respuesta a la búsqueda, no las acepciones. */}
+      {resultado && resultado.enBiblioteca.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 style={{ fontSize: "var(--tamano-1)" }} className="text-texto-suave">
+            Ya en tu repaso
+          </h2>
+          {resultado.enBiblioteca.map((guardado) => (
+            <Tarjeta key={guardado.id}>
+              <div className="flex flex-col gap-2">
+                <p>
+                  <strong>{guardado.term}</strong> → {guardado.translation}
+                </p>
+                {guardado.senseHint && (
+                  <p style={{ fontSize: "var(--tamano-1)" }} className="text-texto-suave">
+                    {guardado.senseHint}
+                  </p>
+                )}
+                <p style={{ fontSize: "var(--tamano-1)" }} className="text-texto-suave">
+                  {guardado.level} · {cuandoTocaRepasar(guardado.due)}
+                </p>
+              </div>
+            </Tarjeta>
+          ))}
+        </section>
+      )}
+
+      {resultado && aviso === "no-esta" && (
         <p className="text-texto-suave">
           <strong className="text-texto">{resultado.termino}</strong> no está en el
           diccionario. Puedes probar con otra forma de la palabra.
+        </p>
+      )}
+
+      {resultado && aviso === "solo-en-biblioteca" && (
+        <p className="text-texto-suave">
+          <strong className="text-texto">{resultado.termino}</strong> no viene en el
+          diccionario, pero ya lo tienes guardado.
         </p>
       )}
 
@@ -238,48 +339,68 @@ export function BuscadorDiccionario() {
               <p className="text-texto-suave">Sin traducción al español.</p>
             )}
 
-            <div className="flex flex-col items-start gap-1">
-              <Boton
-                variante="secundario"
-                onClick={() => afinar(acepcion)}
-                disabled={afinandoIds.has(acepcion.id)}
-              >
-                {afinandoIds.has(acepcion.id) ? "Afinando…" : "Afinar con IA"}
-              </Boton>
-              {/* El usuario tiene que saber que esto cuesta dinero antes de pulsar:
-                  es el único punto de pago de toda la pantalla. */}
-              <p style={{ fontSize: "var(--tamano-1)" }} className="text-texto-suave">
-                Afinar cuesta unos céntimos. Todo lo demás de esta pantalla es gratis.
-              </p>
-            </div>
-
             {acepcion.yaGuardada || guardadas.has(acepcion.id) ? (
               <p className="text-texto-suave">Ya está en tu repaso.</p>
             ) : (
-              <div className="flex items-end gap-3">
+              <>
+                {/* Afinar solo se ofrece mientras la acepción no está guardada:
+                    actualiza la caché del diccionario, no la ficha ya creada en
+                    `terms`. Ofrecerlo después sería cobrar por un cambio que la
+                    tarjeta de repaso no llegaría a ver. */}
+                <div className="flex flex-col items-start gap-1">
+                  <Boton
+                    variante="secundario"
+                    onClick={() => afinar(acepcion)}
+                    disabled={afinandoIds.has(acepcion.id)}
+                  >
+                    {afinandoIds.has(acepcion.id) ? "Afinando…" : "Afinar con IA"}
+                  </Boton>
+                  {/* El usuario tiene que saber que esto cuesta dinero antes de pulsar:
+                      es el único punto de pago de toda la pantalla. */}
+                  <p style={{ fontSize: "var(--tamano-1)" }} className="text-texto-suave">
+                    Afinar cuesta unos céntimos. Todo lo demás de esta pantalla es gratis.
+                  </p>
+                </div>
+
                 <Campo
-                  id={`nivel-${acepcion.id}`}
-                  etiqueta="Nivel"
-                  value={niveles[acepcion.id] ?? ""}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-                    setNiveles((previos) => ({ ...previos, [acepcion.id]: e.target.value }))
+                  id={`traduccion-${acepcion.id}`}
+                  etiqueta="Traducción a mano"
+                  value={traduccionesManuales[acepcion.id] ?? ""}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setTraduccionesManuales((previas) => ({
+                      ...previas,
+                      [acepcion.id]: e.target.value,
+                    }))
                   }
-                  opciones={[
-                    { valor: "", etiqueta: "Elige…" },
-                    ...CEFR_LEVELS.map((nivel) => ({ valor: nivel, etiqueta: nivel })),
-                  ]}
+                  ayuda="Si escribes algo aquí, se guarda esto en vez de la traducción de arriba."
                 />
-                <Boton
-                  onClick={() => anadir(acepcion)}
-                  disabled={botonAnadirDeshabilitado(
-                    niveles[acepcion.id] ?? "",
-                    acepcion.translations.length,
-                    guardandoIds.has(acepcion.id),
-                  )}
-                >
-                  {guardandoIds.has(acepcion.id) ? "Añadiendo…" : "Añadir"}
-                </Boton>
-              </div>
+
+                <div className="flex items-end gap-3">
+                  <Campo
+                    id={`nivel-${acepcion.id}`}
+                    etiqueta="Nivel"
+                    value={niveles[acepcion.id] ?? ""}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                      setNiveles((previos) => ({ ...previos, [acepcion.id]: e.target.value }))
+                    }
+                    opciones={[
+                      { valor: "", etiqueta: "Elige…" },
+                      ...CEFR_LEVELS.map((nivel) => ({ valor: nivel, etiqueta: nivel })),
+                    ]}
+                  />
+                  <Boton
+                    onClick={() => anadir(acepcion)}
+                    disabled={botonAnadirDeshabilitado(
+                      niveles[acepcion.id] ?? "",
+                      acepcion.translations.length,
+                      guardandoIds.has(acepcion.id),
+                      traduccionesManuales[acepcion.id] ?? "",
+                    )}
+                  >
+                    {guardandoIds.has(acepcion.id) ? "Añadiendo…" : "Añadir"}
+                  </Boton>
+                </div>
+              </>
             )}
           </div>
         </Tarjeta>

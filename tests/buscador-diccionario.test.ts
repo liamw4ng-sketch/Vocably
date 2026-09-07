@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import {
   buscarTermino,
   anadirAcepcion,
+  acepcionConTraduccion,
+  avisoSinAcepciones,
   botonAnadirDeshabilitado,
+  cuandoTocaRepasar,
   afinarConIA,
 } from "@/components/BuscadorDiccionario";
 
@@ -117,6 +120,52 @@ describe("afinarConIA", () => {
   });
 });
 
+describe("acepcionConTraduccion", () => {
+  it("lo escrito a mano manda sobre lo que trajo el traductor", () => {
+    const conManual = acepcionConTraduccion({ ...acepcion, translations: ["banco"] }, "  orilla  ");
+    expect(conManual.translations).toEqual(["orilla"]);
+  });
+
+  it("sin nada escrito se guarda lo del traductor", () => {
+    expect(acepcionConTraduccion(acepcion, "   ").translations).toEqual(["orilla"]);
+  });
+
+  it("da salida a una acepción sin traducción ninguna: es la vía gratuita", () => {
+    const sinTraduccion = { ...acepcion, translations: [] };
+    expect(acepcionConTraduccion(sinTraduccion, "orilla").translations).toEqual(["orilla"]);
+  });
+});
+
+describe("cuandoTocaRepasar", () => {
+  const ahora = new Date("2026-09-08T10:00:00Z");
+
+  it("lo vencido toca ahora", () => {
+    expect(cuandoTocaRepasar("2026-09-01T10:00:00Z", ahora)).toBe("toca ahora");
+  });
+
+  it("lo que vence dentro de unos días lo dice en días", () => {
+    expect(cuandoTocaRepasar("2026-09-11T10:00:00Z", ahora)).toBe("toca en 3 días");
+  });
+
+  it("una fecha ilegible no rompe la pantalla", () => {
+    expect(cuandoTocaRepasar("no es una fecha", ahora)).toBe("sin fecha de repaso");
+  });
+});
+
+describe("avisoSinAcepciones", () => {
+  it("con acepciones no avisa de nada", () => {
+    expect(avisoSinAcepciones(2, 0)).toBeNull();
+  });
+
+  it("sin acepciones y sin nada guardado: no está en el diccionario", () => {
+    expect(avisoSinAcepciones(0, 0)).toBe("no-esta");
+  });
+
+  it("sin acepciones pero ya guardado: no se dice que no está, porque sí lo tiene", () => {
+    expect(avisoSinAcepciones(0, 1)).toBe("solo-en-biblioteca");
+  });
+});
+
 describe("botonAnadirDeshabilitado", () => {
   it("se deshabilita sin nivel elegido", () => {
     expect(botonAnadirDeshabilitado("", 1, false)).toBe(true);
@@ -124,6 +173,14 @@ describe("botonAnadirDeshabilitado", () => {
 
   it("se deshabilita sin traducción al español", () => {
     expect(botonAnadirDeshabilitado("B1", 0, false)).toBe(true);
+  });
+
+  it("se habilita sin traductor si la usuaria escribe la traducción a mano", () => {
+    expect(botonAnadirDeshabilitado("B1", 0, false, "orilla")).toBe(false);
+  });
+
+  it("los espacios no cuentan como traducción escrita", () => {
+    expect(botonAnadirDeshabilitado("B1", 0, false, "   ")).toBe(true);
   });
 
   it("se deshabilita mientras la petición de esta tarjeta está en vuelo, aunque nivel y traducción ya estén listos", () => {
