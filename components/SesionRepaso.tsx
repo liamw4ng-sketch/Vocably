@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { CartaCola } from "@/db/repository/review";
-import { TOPE_MAXIMO_TARJETAS_NUEVAS } from "@/lib/ajustes";
+import type { CartaCola, Cola } from "@/db/repository/review";
+import { TOPE_MAXIMO_TARJETAS_NUEVAS, MAXIMO_REPASOS_POR_SESION } from "@/lib/ajustes";
 import { crearSesion, type EnvioRespuesta, type Sesion, type Valoracion } from "@/lib/review-session";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
@@ -43,11 +43,10 @@ const TEXTO_5 = { fontSize: "var(--tamano-5)" };
 const TEXTO_6 = { fontSize: "var(--tamano-6)" };
 
 /** Pide la cola del día. Sin estado de React dentro: solo red. */
-async function pedirCola(adelantar: boolean): Promise<CartaCola[]> {
+async function pedirCola(adelantar: boolean): Promise<Cola> {
   const respuesta = await fetch(`/api/repaso/cola${adelantar ? "?adelantar=1" : ""}`);
   if (!respuesta.ok) throw new Error(`respuesta ${respuesta.status}`);
-  const cuerpo = (await respuesta.json()) as { cartas: CartaCola[] };
-  return cuerpo.cartas;
+  return (await respuesta.json()) as Cola;
 }
 
 /** El cuerpo del POST es exactamente lo que pide la ruta: tres campos, sin fecha ni estado. */
@@ -61,35 +60,105 @@ async function enviarRespuesta(envio: EnvioRespuesta): Promise<unknown> {
   return respuesta.json();
 }
 
-async function pedirTope(): Promise<number> {
+/** Los dos ajustes editables desde esta pantalla. */
+export type CampoAjuste = "newCardsPerDay" | "reviewsPerSession";
+type Ajustes = Record<CampoAjuste, number>;
+
+async function pedirAjustes(): Promise<Ajustes> {
   const respuesta = await fetch("/api/ajustes");
   if (!respuesta.ok) throw new Error(`respuesta ${respuesta.status}`);
-  const cuerpo = (await respuesta.json()) as { newCardsPerDay: number };
-  return cuerpo.newCardsPerDay;
+  return (await respuesta.json()) as Ajustes;
 }
 
-/** Devuelve el tope guardado, o un mensaje de error en español si el servidor
+/** Devuelve el valor guardado, o un mensaje de error en español si el servidor
  * lo rechazó o si la petición ni siquiera pudo hacerse (sin conexión, DNS,
  * servidor caído): en ese caso `fetch` lanza, y sin capturarlo aquí la
  * llamante se quedaría con el `await` colgado para siempre. */
-export async function guardarTope(valor: number): Promise<{ tope: number } | { error: string }> {
+export async function guardarAjuste(
+  campo: CampoAjuste,
+  valor: number,
+): Promise<{ valor: number } | { error: string }> {
   let respuesta: Response;
   try {
     respuesta = await fetch("/api/ajustes", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ newCardsPerDay: valor }),
+      body: JSON.stringify({ [campo]: valor }),
     });
   } catch {
     return { error: "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo otra vez." };
   }
   const cuerpo = (await respuesta.json().catch(() => null)) as
-    | { newCardsPerDay?: number; error?: string }
+    | (Partial<Ajustes> & { error?: string })
     | null;
   if (!respuesta.ok) {
     return { error: cuerpo?.error ?? "No se pudo guardar el cambio." };
   }
-  return { tope: cuerpo?.newCardsPerDay ?? valor };
+  return { valor: cuerpo?.[campo] ?? valor };
+}
+
+/**
+ * Un ajuste numérico editable: borrador, validación en el cliente, guardado y
+ * vuelta al último valor bueno si el servidor lo rechaza. Los dos ajustes se
+ * comportan igual, y una segunda copia de estas líneas acabaría divergiendo
+ * justo donde más duele: en la validación o en el manejo del error.
+ *
+ * No pide su propio valor al servidor: los dos llegan en la misma respuesta y
+ * quien monta la pantalla los reparte con `fijar`.
+ */
+function useAjusteNumerico(
+  campo: CampoAjuste,
+  maximo: number,
+  montadoRef: { current: boolean },
+) {
+  const [valor, setValor] = useState<number | null>(null);
+  const [borrador, setBorrador] = useState("");
+  const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const fijar = useCallback((nuevo: number) => {
+    setValor(nuevo);
+    setBorrador(String(nuevo));
+  }, []);
+
+  /** Se llama al salir del campo. Valida en el cliente para no esperar a la
+   * red con un valor obviamente malo, pero el servidor sigue siendo quien
+   * decide: si lo rechaza, el campo vuelve al último valor guardado y enseña
+   * el motivo. */
+  const confirmar = useCallback(async () => {
+    const texto = borrador.trim();
+    const numero = Number(texto);
+    if (texto === "" || !Number.isInteger(numero) || numero < 0 || numero > maximo) {
+      setError(`Debe ser un número entero entre 0 y ${maximo}.`);
+      return;
+    }
+    if (numero === valor) {
+      setError("");
+      return;
+    }
+
+    setGuardando(true);
+    setError("");
+    try {
+      const resultado = await guardarAjuste(campo, numero);
+      if (!montadoRef.current) return;
+      if ("error" in resultado) {
+        setError(resultado.error);
+        setBorrador(String(valor ?? numero));
+        return;
+      }
+      setValor(resultado.valor);
+      setBorrador(String(resultado.valor));
+    } finally {
+      // `finally` en vez de un `setGuardando(false)` tras el `await`: así el
+      // campo se reactiva pase lo que pase, incluso si `guardarAjuste` (u otra
+      // cosa inesperada) llegara a lanzar. Antes, un `fetch` que lanzaba
+      // dejaba el campo deshabilitado para siempre.
+      if (montadoRef.current) setGuardando(false);
+    }
+  }, [borrador, valor, campo, maximo, montadoRef]);
+
+  return { valor, borrador, setBorrador, error, guardando, fijar, confirmar };
 }
 
 type Trozo = { texto: string; resaltado: boolean };
@@ -174,20 +243,10 @@ export function SesionRepaso() {
   // la sesión ya terminó.
   const [version, redibujar] = useReducer((n: number) => n + 1, 0);
 
-  // Control del tope de tarjetas nuevas, mostrado en las dos pantallas en las
-  // que no hay una sesión en marcha: la de fin de sesión y la de "hoy no toca
-  // nada". `tope === null` significa "aún no se ha pedido al servidor, o la
-  // petición falló" — cuál de las dos es `topeCargaFallo`, más abajo.
-  const [tope, setTope] = useState<number | null>(null);
-  const [topeBorrador, setTopeBorrador] = useState("");
-  const [topeError, setTopeError] = useState("");
-  const [topeGuardando, setTopeGuardando] = useState(false);
-  const [topeCargaFallo, setTopeCargaFallo] = useState(false);
-  // Si el GET fallara, `tope` seguiría siendo `null` para siempre y nada
-  // distinguiría "aún no pedido" de "pedido y fallido" — el efecto de abajo
-  // volvería a intentarlo en cada render. Este ref es la señal real de
-  // "ya lo hemos intentado", independiente del resultado.
-  const topeSolicitadoRef = useRef(false);
+  // Repasos que el límite por sesión dejó fuera. Se lee al pedir la cola y se
+  // enseña al terminar: sin esto, un límite por debajo del ritmo diario
+  // acumula atrasos sin que nada lo diga.
+  const [repasosFuera, setRepasosFuera] = useState(0);
 
   // Se lee dentro de callbacks async (valorar) para no tocar estado tras
   // desmontar, igual que el guard `cancelado` del efecto de carga inicial de
@@ -200,6 +259,19 @@ export function SesionRepaso() {
     };
   }, []);
 
+  // Los dos ajustes, mostrados en las pantallas en las que no hay una sesión
+  // en marcha: la de fin de sesión y la de "hoy no toca nada". `valor === null`
+  // significa "aún no se ha pedido al servidor, o la petición falló" — cuál de
+  // las dos es `ajustesCargaFallo`, más abajo.
+  const topeNuevas = useAjusteNumerico("newCardsPerDay", TOPE_MAXIMO_TARJETAS_NUEVAS, montadoRef);
+  const repasosSesion = useAjusteNumerico("reviewsPerSession", MAXIMO_REPASOS_POR_SESION, montadoRef);
+  const [ajustesCargaFallo, setAjustesCargaFallo] = useState(false);
+  // Si el GET fallara, los valores seguirían siendo `null` para siempre y nada
+  // distinguiría "aún no pedido" de "pedido y fallido" — el efecto de abajo
+  // volvería a intentarlo en cada render. Este ref es la señal real de
+  // "ya lo hemos intentado", independiente del resultado.
+  const ajustesSolicitadosRef = useRef(false);
+
   // Carga inicial: función async dentro del efecto con su guard, igual que en
   // TermTable, para no encadenar renders desde el cuerpo del efecto.
   useEffect(() => {
@@ -209,8 +281,9 @@ export function SesionRepaso() {
       try {
         const cola = await pedirCola(false);
         if (!cancelado) {
-          setCartas(cola);
-          setSesion(crearSesion(cola, { enviar: enviarRespuesta }));
+          setCartas(cola.cartas);
+          setRepasosFuera(cola.repasosFuera);
+          setSesion(crearSesion(cola.cartas, { enviar: enviarRespuesta }));
           setEstado("lista");
         }
       } catch {
@@ -240,26 +313,29 @@ export function SesionRepaso() {
   // la cola se vaciaba, la única pantalla con el control era la de fin de
   // sesión —a la que ya no se podía llegar— y no hay pantalla de ajustes.
   useEffect(() => {
-    if (!sesion || topeSolicitadoRef.current) return;
+    if (!sesion || ajustesSolicitadosRef.current) return;
     if (sesion.cartaActual()) return;
 
-    topeSolicitadoRef.current = true;
+    ajustesSolicitadosRef.current = true;
     let cancelado = false;
-    pedirTope()
-      .then((valor) => {
+    pedirAjustes()
+      .then((ajustes) => {
         if (!cancelado) {
-          setTope(valor);
-          setTopeBorrador(String(valor));
+          topeNuevas.fijar(ajustes.newCardsPerDay);
+          repasosSesion.fijar(ajustes.reviewsPerSession);
         }
       })
       .catch(() => {
         // No bloqueamos el cierre de la sesión, pero sí lo decimos: sin esto
         // el control simplemente no aparecía y nada explicaba por qué.
-        if (!cancelado) setTopeCargaFallo(true);
+        if (!cancelado) setAjustesCargaFallo(true);
       });
     return () => {
       cancelado = true;
     };
+    // `fijar` es estable (useCallback sin dependencias); lo que dispara este
+    // efecto es que la sesión llegue a su final, que es lo que señala `version`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sesion, version]);
 
   /** Reintentar tras un error, o adelantar palabras nuevas: siempre desde un evento. */
@@ -267,8 +343,9 @@ export function SesionRepaso() {
     setEstado("cargando");
     try {
       const cola = await pedirCola(adelantar);
-      setCartas(cola);
-      setSesion(crearSesion(cola, { enviar: enviarRespuesta }));
+      setCartas(cola.cartas);
+      setRepasosFuera(cola.repasosFuera);
+      setSesion(crearSesion(cola.cartas, { enviar: enviarRespuesta }));
       setRevelada(false);
       setGuardando(false);
       setAdelantado(adelantar);
@@ -279,49 +356,6 @@ export function SesionRepaso() {
   }, []);
 
   const revelar = useCallback(() => setRevelada(true), []);
-
-  /** Se llama al salir del campo del tope. Valida en el cliente para no
-   * esperar a la red con un valor obviamente malo, pero el servidor sigue
-   * siendo quien decide: si lo rechaza, el campo vuelve al último valor
-   * guardado y enseña el motivo. */
-  async function confirmarTope() {
-    const texto = topeBorrador.trim();
-    const valor = Number(texto);
-    if (
-      texto === "" ||
-      !Number.isInteger(valor) ||
-      valor < 0 ||
-      valor > TOPE_MAXIMO_TARJETAS_NUEVAS
-    ) {
-      setTopeError(`Debe ser un número entero entre 0 y ${TOPE_MAXIMO_TARJETAS_NUEVAS}.`);
-      return;
-    }
-    if (valor === tope) {
-      setTopeError("");
-      return;
-    }
-
-    setTopeGuardando(true);
-    setTopeError("");
-    try {
-      const resultado = await guardarTope(valor);
-      if (!montadoRef.current) return;
-      if ("error" in resultado) {
-        setTopeError(resultado.error);
-        setTopeBorrador(String(tope ?? valor));
-        return;
-      }
-      setTope(resultado.tope);
-      setTopeBorrador(String(resultado.tope));
-    } finally {
-      // `finally` en vez de un `setTopeGuardando(false)` tras el `await`:
-      // así el campo se reactiva pase lo que pase, incluso si `guardarTope`
-      // (u otra cosa inesperada) llegara a lanzar. Ver hallazgo 1 del
-      // informe: antes, un `fetch` que lanzaba dejaba el campo deshabilitado
-      // para siempre.
-      if (montadoRef.current) setTopeGuardando(false);
-    }
-  }
 
   const valorar = useCallback(
     (valor: Valoracion) => {
@@ -395,13 +429,12 @@ export function SesionRepaso() {
   const { hechas, total } = sesion.progreso();
   const carta = sesion.cartaActual();
 
-  // Un solo control del tope para las dos pantallas de final (sesión
-  // terminada y cola vacía): misma validación, mismo aviso de guardado, misma
-  // recuperación si el servidor rechaza el valor. Dos copias del control
-  // acabarían divergiendo.
-  const controlTope =
-    tope !== null ? (
-      <div className="flex flex-col gap-2 border-t border-borde pt-4">
+  // Un solo control para las dos pantallas de final (sesión terminada y cola
+  // vacía): misma validación, mismo aviso de guardado, misma recuperación si
+  // el servidor rechaza el valor. Dos copias del control acabarían divergiendo.
+  const controlAjustes =
+    topeNuevas.valor !== null ? (
+      <div className="flex flex-col gap-4 border-t border-borde pt-4">
         <Campo
           id="tope-tarjetas-nuevas"
           etiqueta="Tarjetas nuevas al día"
@@ -410,23 +443,44 @@ export function SesionRepaso() {
           inputMode="numeric"
           min={0}
           max={TOPE_MAXIMO_TARJETAS_NUEVAS}
-          value={topeBorrador}
-          disabled={topeGuardando}
+          value={topeNuevas.borrador}
+          disabled={topeNuevas.guardando}
           onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
-            setTopeBorrador(evento.target.value)
+            topeNuevas.setBorrador(evento.target.value)
           }
-          onBlur={() => void confirmarTope()}
-          error={topeError}
+          onBlur={() => void topeNuevas.confirmar()}
+          error={topeNuevas.error}
           ayuda={
-            topeError
+            topeNuevas.error
               ? undefined
               : "Cuántas palabras nuevas quieres ver cada día. Se guarda para las próximas sesiones."
           }
         />
+        <Campo
+          id="repasos-por-sesion"
+          etiqueta="Repasos por sesión"
+          className="max-w-40"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={MAXIMO_REPASOS_POR_SESION}
+          value={repasosSesion.borrador}
+          disabled={repasosSesion.guardando}
+          onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
+            repasosSesion.setBorrador(evento.target.value)
+          }
+          onBlur={() => void repasosSesion.confirmar()}
+          error={repasosSesion.error}
+          ayuda={
+            repasosSesion.error
+              ? undefined
+              : "Cuántas palabras ya aprendidas entran en cada sesión, elegidas al azar entre las que toquen. 0 = todas."
+          }
+        />
       </div>
-    ) : topeCargaFallo ? (
+    ) : ajustesCargaFallo ? (
       <p style={TEXTO_1} className="border-t border-borde pt-4 text-texto-suave">
-        No se ha podido cargar el tope de tarjetas nuevas. Actualiza la página para intentarlo
+        No se han podido cargar los ajustes del repaso. Actualiza la página para intentarlo
         de nuevo.
       </p>
     ) : null;
@@ -435,7 +489,7 @@ export function SesionRepaso() {
     // Con el tope a 0 no entra ninguna palabra nueva, así que adelantar
     // tampoco daría ninguna: en vez de ofrecer un botón que no puede hacer
     // nada, se dice por qué y se deja el control del tope justo debajo.
-    const topeEnCero = tope === 0;
+    const topeEnCero = topeNuevas.valor === 0;
     return (
       <Tarjeta className="flex flex-col gap-4">
         <h1 style={TEXTO_4} className="font-semibold">
@@ -453,7 +507,7 @@ export function SesionRepaso() {
             Adelantar palabras nuevas
           </Boton>
         )}
-        {controlTope}
+        {controlAjustes}
         <Boton variante="secundario" onClick={() => router.push("/biblioteca")}>
           Volver a la biblioteca
         </Boton>
@@ -516,9 +570,25 @@ export function SesionRepaso() {
           </p>
         ) : null}
 
-        {controlTope}
+        {repasosFuera > 0 ? (
+          <div className="flex flex-col gap-3 border-t border-borde pt-4">
+            <p style={TEXTO_2} className="text-texto-suave">
+              {repasosFuera === 1
+                ? "Queda 1 repaso más para hoy, fuera del límite de esta sesión."
+                : `Quedan ${repasosFuera} repasos más para hoy, fuera del límite de esta sesión.`}
+            </p>
+            <Boton variante="primario" onClick={() => void recargar(false)}>
+              Seguir repasando
+            </Boton>
+          </div>
+        ) : null}
 
-        <Boton variante="primario" onClick={() => router.push("/biblioteca")}>
+        {controlAjustes}
+
+        <Boton
+          variante={repasosFuera > 0 ? "secundario" : "primario"}
+          onClick={() => router.push("/biblioteca")}
+        >
           Volver a la biblioteca
         </Boton>
       </Tarjeta>
