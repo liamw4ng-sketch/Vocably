@@ -388,9 +388,14 @@ export function TermTable() {
                       onBlur={(event) => void save(row, "term", event.target.value)}
                       aria-label="Término"
                       style={TEXTO_3}
-                      className="min-h-12 flex-1 rounded-control border border-borde bg-superficie px-4 font-serif font-semibold text-texto"
+                      className="min-h-12 min-w-0 flex-1 rounded-control border border-borde bg-superficie px-4 font-serif font-semibold text-texto"
                     />
-                    <Boton variante="peligro" onClick={() => void remove(row.id)} className="shrink-0">
+                    <Boton
+                      type="button"
+                      variante="peligro"
+                      onClick={() => void remove(row.id)}
+                      className="shrink-0"
+                    >
                       Borrar
                     </Boton>
                   </div>
@@ -441,6 +446,12 @@ export function TermTable() {
                       ))}
                     </select>
                   </div>
+                  {(guardados[draftKey(row.id, "type")] ||
+                    guardados[draftKey(row.id, "level")]) && (
+                    <p style={TEXTO_1} className="-mt-2 text-texto-suave">
+                      Guardado
+                    </p>
+                  )}
 
                   {rowErrors[row.id] && (
                     <p
