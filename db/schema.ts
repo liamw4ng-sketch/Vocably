@@ -32,9 +32,20 @@ export const terms = pgTable(
     level: text("level").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    /**
+     * El significado en inglés de la acepción guardada. Vacío en todo lo que
+     * viene de un PDF, que es como se conserva el comportamiento anterior:
+     * la clave de deduplicación de una extracción sigue siendo el término solo.
+     * Se muestra en la cara delantera de la tarjeta para distinguir
+     * `bank` → orilla de `bank` → banco sin adelantar la respuesta en español.
+     */
+    senseHint: text("sense_hint").notNull().default(""),
   },
   (table) => ({
-    termNormalizedIdx: uniqueIndex("terms_term_normalized_idx").on(table.termNormalized),
+    termNormalizedIdx: uniqueIndex("terms_term_normalized_idx").on(
+      table.termNormalized,
+      table.senseHint,
+    ),
   }),
 );
 

@@ -149,4 +149,59 @@ describe("saveExtraction", () => {
     expect(source?.inputTokens).toBe(100);
     await close();
   });
+
+  it("reextraer el mismo PDF sigue fusionando tras añadir la pista", async () => {
+    const { db, close } = await createTestDb();
+    await saveExtraction(db, { ...base, items: [comeAcross] });
+    const [antes] = await db.select().from(terms);
+
+    // Se corrige la traducción a mano, como haría el usuario en la biblioteca.
+    await db.update(terms).set({ translation: "toparse con" }).where(eq(terms.id, antes.id));
+
+    const segunda = await saveExtraction(db, { ...base, items: [comeAcross] });
+
+    expect(segunda.created).toBe(0);
+    expect(segunda.merged).toBe(1);
+
+    const guardados = await db.select().from(terms);
+    expect(guardados).toHaveLength(1);
+    expect(guardados[0].id).toBe(antes.id);
+    expect(guardados[0].translation).toBe("toparse con"); // no se pisa
+    expect(guardados[0].senseHint).toBe("");             // lo del PDF no lleva pista
+
+    const cards = await db.select().from(cardStates);
+    expect(cards).toHaveLength(1); // el progreso de repaso sigue siendo uno solo
+    await close();
+  });
+
+  it("permite dos acepciones del mismo término con pistas distintas", async () => {
+    const { db, close } = await createTestDb();
+    const fila = {
+      term: "bank",
+      termNormalized: "bank",
+      type: "word",
+      translation: "banco",
+      level: "B1",
+    };
+    await db.insert(terms).values({ ...fila, senseHint: "A financial institution." });
+    await db.insert(terms).values({ ...fila, translation: "orilla", senseHint: "An edge of a river." });
+
+    expect(await db.select().from(terms)).toHaveLength(2);
+    await close();
+  });
+
+  it("sigue rechazando dos veces la misma acepción", async () => {
+    const { db, close } = await createTestDb();
+    const fila = {
+      term: "bank",
+      termNormalized: "bank",
+      type: "word",
+      translation: "banco",
+      level: "B1",
+      senseHint: "A financial institution.",
+    };
+    await db.insert(terms).values(fila);
+    await expect(db.insert(terms).values(fila)).rejects.toThrow();
+    await close();
+  });
 });
