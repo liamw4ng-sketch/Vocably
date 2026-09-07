@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Fraunces, Bricolage_Grotesque } from "next/font/google";
 import "./globals.css";
 
@@ -16,6 +16,10 @@ export const metadata: Metadata = {
   title: "AppVocabulario",
   description:
     "Extrae vocabulario en inglés de un PDF con la API de Claude y guárdalo para repasarlo.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#E1552C",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
