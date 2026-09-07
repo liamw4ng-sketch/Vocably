@@ -27,6 +27,18 @@ describe("variantesDelLema", () => {
     expect(variantesDelLema("give someone a hand")).toContain("give somebody a hand");
   });
 
+  it("intercambia someone's y somebody's en forma posesiva", () => {
+    expect(variantesDelLema("spring to someone's defence")).toContain(
+      "spring to somebody's defence",
+    );
+  });
+
+  it("funciona también al revés: de somebody's a someone's", () => {
+    expect(variantesDelLema("spring to somebody's defence")).toContain(
+      "spring to someone's defence",
+    );
+  });
+
   it("solo cambia palabras enteras", () => {
     // "young" contiene "you" pero no es "you".
     expect(variantesDelLema("young at heart")).toEqual(["young at heart"]);

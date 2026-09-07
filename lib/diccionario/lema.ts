@@ -12,6 +12,7 @@ const PARES: ReadonlyArray<readonly [string, string]> = [
   ["yourself", "oneself"],
   ["yourselves", "oneself"],
   ["someone", "somebody"],
+  ["someone's", "somebody's"],
 ];
 
 function sustituir(termino: string, de: string, a: string): string {
