@@ -75,6 +75,36 @@ describe("buscarEnBiblioteca", () => {
     await close();
   });
 
+  it("encuentra un término guardado bajo una variante del lema, buscando con otra", async () => {
+    const { db, close } = await createTestDb();
+    await saveExtraction(db, {
+      title: "Novela",
+      pageStart: 10,
+      pageEnd: 20,
+      level: "C1",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      items: [
+        {
+          term: "bite off more than one can chew",
+          type: "expression",
+          translation: "abarcar más de lo que se puede",
+          context: "He bit off more than one could chew.",
+          example: "Don't bite off more than one can chew.",
+        },
+      ],
+    });
+
+    const guardados = await buscarEnBiblioteca(db, "bite off more than you can chew");
+    expect(guardados).toHaveLength(1);
+    expect(guardados[0].term).toBe("bite off more than one can chew");
+    expect(guardados[0].translation).toBe("abarcar más de lo que se puede");
+    expect(guardados[0].level).toBe("C1");
+    expect(guardados[0].senseHint).toBe("");
+    await close();
+  });
+
   it("devuelve vacío si el término no está en la biblioteca", async () => {
     const { db, close } = await createTestDb();
     expect(await buscarEnBiblioteca(db, "come across")).toEqual([]);
