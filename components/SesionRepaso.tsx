@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { CartaCola } from "@/db/repository/review";
 import { crearSesion, type EnvioRespuesta, type Sesion, type Valoracion } from "@/lib/review-session";
 import { Boton } from "@/components/ui/Boton";
+import { Campo } from "@/components/ui/Campo";
 import { Tarjeta } from "@/components/ui/Tarjeta";
 
 type Estado = "cargando" | "error" | "lista";
@@ -57,6 +58,33 @@ async function enviarRespuesta(envio: EnvioRespuesta): Promise<unknown> {
   });
   if (!respuesta.ok) throw new Error(`respuesta ${respuesta.status}`);
   return respuesta.json();
+}
+
+/** Mismo límite que valida `/api/ajustes/route.ts`: se repite aquí solo para
+ * poder avisar sin esperar a la red, el servidor sigue siendo quien manda. */
+const TOPE_MAXIMO_TARJETAS_NUEVAS = 200;
+
+async function pedirTope(): Promise<number> {
+  const respuesta = await fetch("/api/ajustes");
+  if (!respuesta.ok) throw new Error(`respuesta ${respuesta.status}`);
+  const cuerpo = (await respuesta.json()) as { newCardsPerDay: number };
+  return cuerpo.newCardsPerDay;
+}
+
+/** Devuelve el tope guardado, o un mensaje de error en español si el servidor lo rechazó. */
+async function guardarTope(valor: number): Promise<{ tope: number } | { error: string }> {
+  const respuesta = await fetch("/api/ajustes", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ newCardsPerDay: valor }),
+  });
+  const cuerpo = (await respuesta.json().catch(() => null)) as
+    | { newCardsPerDay?: number; error?: string }
+    | null;
+  if (!respuesta.ok) {
+    return { error: cuerpo?.error ?? "No se pudo guardar el cambio." };
+  }
+  return { tope: cuerpo?.newCardsPerDay ?? valor };
 }
 
 type Trozo = { texto: string; resaltado: boolean };
@@ -137,6 +165,13 @@ export function SesionRepaso() {
   // `Sesion` es un objeto mutable sin React dentro: hay que pedir el redibujo.
   const [, redibujar] = useReducer((n: number) => n + 1, 0);
 
+  // Control del tope de tarjetas nuevas, mostrado solo en la pantalla de fin
+  // de sesión. `tope === null` significa "aún no se ha pedido al servidor".
+  const [tope, setTope] = useState<number | null>(null);
+  const [topeBorrador, setTopeBorrador] = useState("");
+  const [topeError, setTopeError] = useState("");
+  const [topeGuardando, setTopeGuardando] = useState(false);
+
   // Se lee dentro de callbacks async (valorar) para no tocar estado tras
   // desmontar, igual que el guard `cancelado` del efecto de carga inicial de
   // abajo, pero aquí como ref porque el disparador es un evento, no un efecto.
@@ -172,6 +207,31 @@ export function SesionRepaso() {
     };
   }, []);
 
+  // Sin array de dependencias: se comprueba en cada render si la sesión ya
+  // terminó (no hay forma de saberlo de antemano, `sesion` es el mismo objeto
+  // mutable durante toda la sesión, solo cambia lo que devuelve cartaActual).
+  // El guard `tope !== null` hace que la petición solo se dispare una vez.
+  useEffect(() => {
+    if (!sesion || tope !== null) return;
+    if (sesion.progreso().total === 0 || sesion.cartaActual()) return;
+
+    let cancelado = false;
+    pedirTope()
+      .then((valor) => {
+        if (!cancelado) {
+          setTope(valor);
+          setTopeBorrador(String(valor));
+        }
+      })
+      .catch(() => {
+        // Si esto falla no bloqueamos el cierre de la sesión: el control de
+        // tope simplemente no aparece.
+      });
+    return () => {
+      cancelado = true;
+    };
+  });
+
   /** Reintentar tras un error, o adelantar palabras nuevas: siempre desde un evento. */
   const recargar = useCallback(async (adelantar: boolean) => {
     setEstado("cargando");
@@ -189,6 +249,41 @@ export function SesionRepaso() {
   }, []);
 
   const revelar = useCallback(() => setRevelada(true), []);
+
+  /** Se llama al salir del campo del tope. Valida en el cliente para no
+   * esperar a la red con un valor obviamente malo, pero el servidor sigue
+   * siendo quien decide: si lo rechaza, el campo vuelve al último valor
+   * guardado y enseña el motivo. */
+  async function confirmarTope() {
+    const texto = topeBorrador.trim();
+    const valor = Number(texto);
+    if (
+      texto === "" ||
+      !Number.isInteger(valor) ||
+      valor < 0 ||
+      valor > TOPE_MAXIMO_TARJETAS_NUEVAS
+    ) {
+      setTopeError(`Debe ser un número entero entre 0 y ${TOPE_MAXIMO_TARJETAS_NUEVAS}.`);
+      return;
+    }
+    if (valor === tope) {
+      setTopeError("");
+      return;
+    }
+
+    setTopeGuardando(true);
+    setTopeError("");
+    const resultado = await guardarTope(valor);
+    if (!montadoRef.current) return;
+    setTopeGuardando(false);
+    if ("error" in resultado) {
+      setTopeError(resultado.error);
+      setTopeBorrador(String(tope ?? valor));
+      return;
+    }
+    setTope(resultado.tope);
+    setTopeBorrador(String(resultado.tope));
+  }
 
   const valorar = useCallback(
     (valor: Valoracion) => {
@@ -293,7 +388,7 @@ export function SesionRepaso() {
       .join(", ");
 
     return (
-      <Tarjeta className="flex flex-col gap-6">
+      <Tarjeta className="animacion-cierre-sesion flex flex-col gap-6">
         <div className="flex flex-col gap-2">
           <h1 style={TEXTO_4} className="font-semibold">
             Repaso terminado
@@ -302,6 +397,9 @@ export function SesionRepaso() {
             {resumen.total === 1
               ? "Has repasado 1 tarjeta."
               : `Has repasado ${resumen.total} tarjetas.`}
+          </p>
+          <p style={TEXTO_2} className="font-medium">
+            Buen trabajo, ya has terminado por hoy.
           </p>
         </div>
 
@@ -335,6 +433,32 @@ export function SesionRepaso() {
             , revisa tu conexión: {terminosPerdidos}. Esas tarjetas volverán a aparecer en el
             próximo repaso.
           </p>
+        ) : null}
+
+        {tope !== null ? (
+          <div className="flex flex-col gap-2 border-t border-borde pt-4">
+            <Campo
+              id="tope-tarjetas-nuevas"
+              etiqueta="Tarjetas nuevas al día"
+              className="max-w-40"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={TOPE_MAXIMO_TARJETAS_NUEVAS}
+              value={topeBorrador}
+              disabled={topeGuardando}
+              onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
+                setTopeBorrador(evento.target.value)
+              }
+              onBlur={() => void confirmarTope()}
+              error={topeError}
+              ayuda={
+                topeError
+                  ? undefined
+                  : "Cuántas palabras nuevas quieres ver cada día. Se guarda para las próximas sesiones."
+              }
+            />
+          </div>
         ) : null}
 
         <Boton variante="primario" onClick={() => router.push("/biblioteca")}>

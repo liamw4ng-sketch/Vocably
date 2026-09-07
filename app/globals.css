@@ -100,3 +100,24 @@ body {
   color: var(--texto);
   font-family: var(--fuente-ui);
 }
+
+/* Cierre de sesión: una aparición breve y sobria, no una celebración
+   animada. Sin rebote, sin color, sin repetición: solo una entrada suave. */
+@keyframes aparece-cierre-sesion {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animacion-cierre-sesion {
+  animation: aparece-cierre-sesion 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animacion-cierre-sesion {
+    animation: none;
+  }
+}
