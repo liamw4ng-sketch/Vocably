@@ -317,10 +317,17 @@ export function SesionRepaso() {
     if (sesion.cartaActual()) return;
 
     ajustesSolicitadosRef.current = true;
-    let cancelado = false;
+    // El guard es `montadoRef`, no un `cancelado` local con función de
+    // limpieza. Este efecto depende de `version`, que se incrementa otra vez
+    // en cuanto `pendientes()` termina de guardar las últimas respuestas: una
+    // limpieza por render cancelaba la petición en vuelo, y como el ref ya
+    // estaba puesto, la nueva pasada no volvía a pedirla. El control de
+    // ajustes desaparecía del final de sesión —sin control y sin mensaje de
+    // error— siempre que los ajustes tardaran más que el último guardado.
+    // Ganaba quien llegara antes, así que fallaba de forma intermitente.
     pedirAjustes()
       .then((ajustes) => {
-        if (!cancelado) {
+        if (montadoRef.current) {
           topeNuevas.fijar(ajustes.newCardsPerDay);
           repasosSesion.fijar(ajustes.reviewsPerSession);
         }
@@ -328,11 +335,8 @@ export function SesionRepaso() {
       .catch(() => {
         // No bloqueamos el cierre de la sesión, pero sí lo decimos: sin esto
         // el control simplemente no aparecía y nada explicaba por qué.
-        if (!cancelado) setAjustesCargaFallo(true);
+        if (montadoRef.current) setAjustesCargaFallo(true);
       });
-    return () => {
-      cancelado = true;
-    };
     // `fijar` es estable (useCallback sin dependencias); lo que dispara este
     // efecto es que la sesión llegue a su final, que es lo que señala `version`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -438,7 +442,7 @@ export function SesionRepaso() {
         <Campo
           id="tope-tarjetas-nuevas"
           etiqueta="Tarjetas nuevas al día"
-          className="max-w-40"
+          claseControl="max-w-40"
           type="number"
           inputMode="numeric"
           min={0}
@@ -459,7 +463,7 @@ export function SesionRepaso() {
         <Campo
           id="repasos-por-sesion"
           etiqueta="Repasos por sesión"
-          className="max-w-40"
+          claseControl="max-w-40"
           type="number"
           inputMode="numeric"
           min={0}
