@@ -17,6 +17,8 @@ export type CartaCola = {
   translation: string;
   type: string;
   level: string;
+  /** El significado en inglés de la acepción, para distinguir `bank`/orilla de `bank`/banco. Vacío en lo extraído de un PDF. */
+  senseHint: string;
   context: string;
   example: string;
   esNueva: boolean;
@@ -121,6 +123,7 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
       translation: terms.translation,
       type: terms.type,
       level: terms.level,
+      senseHint: terms.senseHint,
       context: termOccurrences.context,
       example: termOccurrences.example,
       state: cardStates.state,
@@ -157,6 +160,7 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
       translation: f.translation,
       type: f.type,
       level: f.level,
+      senseHint: f.senseHint,
       context: f.context ?? "",
       example: f.example ?? "",
       esNueva: f.state === State.New,

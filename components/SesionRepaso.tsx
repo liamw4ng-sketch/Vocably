@@ -666,6 +666,15 @@ export function SesionRepaso() {
             <p style={TEXTO_6} className="font-serif break-words">
               {carta.term}
             </p>
+            {carta.senseHint ? (
+              <p
+                className="line-clamp-1 text-texto-suave"
+                style={TEXTO_1}
+                title={carta.senseHint}
+              >
+                {carta.senseHint}
+              </p>
+            ) : null}
             {carta.context ? (
               <Frase
                 frase={carta.context}
