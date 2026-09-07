@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "AppVocabulario",
-    short_name: "Vocabulario",
+    name: "Vocably",
+    short_name: "Vocably",
     description:
       "Extrae vocabulario en inglés de un PDF con la API de Claude y guárdalo para repasarlo.",
     start_url: "/repaso",

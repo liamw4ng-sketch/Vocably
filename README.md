@@ -1,4 +1,4 @@
-# AppVocabulario
+# Vocably
 
 Extrae vocabulario en inglés de un PDF con la API de Claude y lo guarda para
 repasarlo con repetición espaciada. Aplicación de un solo usuario, sin registro

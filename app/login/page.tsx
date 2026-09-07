@@ -36,7 +36,7 @@ export default function LoginPage() {
     <main className="flex min-h-screen flex-col items-center justify-center p-4">
       <Tarjeta className="flex w-full max-w-sm flex-col gap-6">
         <h1 style={{ fontSize: "var(--tamano-5)" }} className="font-semibold text-texto">
-          AppVocabulario
+          Vocably
         </h1>
         <form onSubmit={submit} className="flex flex-col gap-4">
           <Campo

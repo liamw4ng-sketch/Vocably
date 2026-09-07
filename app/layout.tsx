@@ -13,7 +13,7 @@ const bricolageGrotesque = Bricolage_Grotesque({
 });
 
 export const metadata: Metadata = {
-  title: "AppVocabulario",
+  title: "Vocably",
   description:
     "Extrae vocabulario en inglés de un PDF con la API de Claude y guárdalo para repasarlo.",
 };
