@@ -26,8 +26,9 @@ directamente a `/extraer`.
 ## Repaso con repetición espaciada
 
 La pantalla `/repaso` muestra, una tarjeta a la vez, las palabras que tocan
-hoy: primero las vencidas y, hasta el tope diario, palabras nuevas de la
-biblioteca. Se pulsa (o se pulsa la barra espaciadora) para ver la traducción
+hoy, en tres grupos y en este orden: las que están **en curso** (falladas hace
+minutos, en aprendizaje o reaprendizaje), las ya **aprendidas** que vencen hoy,
+y por último las **nuevas** hasta el tope diario. Se pulsa (o se pulsa la barra espaciadora) para ver la traducción
 y el ejemplo, y se valora con uno de cuatro botones — Otra vez / Difícil /
 Bien / Fácil, también accesibles con las teclas 1-4 — que alimentan el
 algoritmo de repetición espaciada FSRS (paquete `ts-fsrs`) y fijan cuándo
@@ -48,11 +49,35 @@ ya respondida en esa misma cola. (Si una tarjeta valorada "Otra vez" vuelve a
 salir al cabo de unos minutos, es el comportamiento normal de FSRS —un paso
 de aprendizaje corto—, no una tarjeta que haya "olvidado" su respuesta.)
 
-Cuántas palabras nuevas al día se introducen es configurable: la tabla
-`settings` (una sola fila) guarda `newCardsPerDay`, con 20 por defecto. Se
-ajusta desde un campo en la propia pantalla de repaso, en la tarjeta de
+### Los dos ajustes
+
+La tabla `settings` (una sola fila) guarda los dos números que el usuario
+controla. Se ajustan desde la propia pantalla de repaso, en la tarjeta de
 resumen que aparece al terminar la sesión — no hay una pantalla de ajustes
 aparte.
+
+- **`newCardsPerDay`** (20 por defecto): cuántas palabras nuevas entran al
+  día. Es diario: se cuentan las introducciones ya registradas hoy
+  (`review_logs` con `state = 0` desde la medianoche de Madrid) y se resta.
+- **`reviewsPerSession`** (0 por defecto): cuántas palabras ya aprendidas
+  entran en cada sesión. **0 significa "todas las que venzan"**, así que por
+  defecto la app no recorta nada por su cuenta.
+
+Cuando vencen más palabras aprendidas de las que caben en la sesión, se
+**sortean**: cuáles entran se decide al azar, no por antigüedad ni por id, de
+modo que ninguna palabra queda sistemáticamente al final de la cola. El sorteo
+solo actúa cuando hay una decisión que tomar; si caben todas, el orden no se
+toca.
+
+Dos garantías del recorte:
+
+- **Las que están en curso nunca se recortan.** Son las que acabas de fallar y
+  el algoritmo quiere volver a preguntar en minutos; dejarlas fuera sería lo
+  único que rompería de verdad la repetición espaciada.
+- **Lo que queda fuera no se pierde:** sigue vencido y entra en la sesión
+  siguiente. Al terminar, la pantalla dice cuántos repasos quedaron fuera del
+  límite y ofrece seguir. Conviene mirarlo: un límite por debajo del ritmo
+  diario acumula atrasos, y sin ese aviso lo haría en silencio.
 
 ### Instalable en el móvil
 
@@ -183,8 +208,11 @@ Con la base de datos de Neon ya usando la contraseña nueva del paso 1:
 DATABASE_URL='<cadena de Neon>' npx drizzle-kit push
 ```
 
-Esto crea la tabla `settings` y añade `learning_steps` a `card_states` y
-`answer_id` a `review_logs` (migración `drizzle/0001_adorable_boomerang.sql`).
+Esto aplica las dos migraciones pendientes de una vez:
+`drizzle/0001_adorable_boomerang.sql` crea la tabla `settings` y añade
+`learning_steps` a `card_states` y `answer_id` a `review_logs`;
+`drizzle/0002_little_yellowjacket.sql` añade `reviews_per_session` a
+`settings`.
 `drizzle-kit push` no lee `.env.local`, así que hay que pasarle
 `DATABASE_URL` explícitamente en el propio comando, con la cadena de conexión
 real de Neon.
@@ -199,9 +227,11 @@ SELECT column_name FROM information_schema.columns
 SELECT column_name FROM information_schema.columns
   WHERE table_name = 'review_logs' AND column_name = 'answer_id';
 SELECT to_regclass('public.settings');
+SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'settings' AND column_name = 'reviews_per_session';
 ```
 
-Las tres deben devolver una fila (la tercera, el nombre `settings` en vez de
+Las cuatro deben devolver una fila (la tercera, el nombre `settings` en vez de
 `NULL`). Y comprobar que el vocabulario existente sigue intacto, comparando
 con el número anotado en el paso 2:
 
@@ -219,7 +249,7 @@ automático).
 
 La única operación de la app que tiene coste es la extracción de vocabulario
 desde un PDF (la llamada a la API de Claude). El repaso en `/repaso` —
-cargar la cola, responder tarjetas, ajustar el tope de tarjetas nuevas— no
+cargar la cola, responder tarjetas, cambiar los ajustes— no
 llama a Anthropic nunca y por tanto no añade coste, por muchas sesiones que
 se hagan al día.
 
@@ -267,18 +297,29 @@ verifique todo lo siguiente:
       vuelvan a salir y las valoradas como "Fácil" no.
 - [ ] Que el diseño resulte cómodo de usar tras varias sesiones, no solo
       bonito la primera vez.
+- [ ] Poner "Repasos por sesión" en un número bajo (3, por ejemplo) y
+      comprobar que la sesión trae ese número, que el aviso de lo que quedó
+      fuera cuadra, y que "Seguir repasando" trae palabras distintas.
+- [ ] Volver a ponerlo en 0 y comprobar que vuelven a entrar todas.
 
 ## Estado actual y limitaciones conocidas
 
 - **Fase 1:** extracción desde PDF y biblioteca editable. Código completo y
   probado.
 - **Fase 2 (repaso con repetición espaciada):** construida. Pantalla
-  `/repaso`, algoritmo FSRS, tope diario de tarjetas nuevas configurable
-  (tabla `settings`), manifiesto para instalar la app en el móvil con
-  `start_url` en `/repaso`. No consume la API de Claude en ningún momento
-  (ver "Coste"). Pendiente solo la prueba de aceptación de más arriba, que
-  hace el usuario en su móvil.
-- La suite completa suma **160 pruebas**, ninguna contra la API de Claude ni
+  `/repaso`, algoritmo FSRS, los dos ajustes de la tabla `settings` (tope
+  diario de palabras nuevas y límite de repasos por sesión con sorteo),
+  manifiesto para instalar la app en el móvil con `start_url` en `/repaso`. No
+  consume la API de Claude en ningún momento (ver "Coste"). Pendiente solo la
+  prueba de aceptación de más arriba, que hace el usuario en su móvil.
+- La suite completa suma **197 pruebas**, ninguna contra la API de Claude ni
   contra una base de datos real.
+- **No hay pruebas de componentes.** Vitest corre con `environment: "node"`,
+  sin jsdom ni Testing Library, así que ninguna prueba puede pulsar un botón
+  ni comprobar qué se pinta. Lo que se prueba de la interfaz son sus funciones
+  puras (`lib/review-session.ts`, `guardarAjuste`). Dos fallos reales de esta
+  fase —el campo del tope que se quedaba deshabilitado y el bloque de ajustes
+  que desaparecía al terminar la sesión— solo aparecieron conduciendo un
+  navegador a mano.
 - Si `SESSION_SECRET` falta, el fallo al arrancar es un error genérico de
   Node, no un mensaje claro pensado para esto.
