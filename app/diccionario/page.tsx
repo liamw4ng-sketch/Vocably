@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { ExtractForm } from "@/components/ExtractForm";
+import { BuscadorDiccionario } from "@/components/BuscadorDiccionario";
 
-export default function ExtraerPage() {
+export default function DiccionarioPage() {
   return (
-    <main className="mx-auto flex max-w-xl flex-col gap-6 p-6">
+    <main className="mx-auto flex w-full max-w-xl flex-col gap-6 p-6">
       <header className="flex items-baseline justify-between gap-4">
         <h1 style={{ fontSize: "var(--tamano-4)" }} className="font-semibold text-texto">
-          Extraer vocabulario
+          Diccionario
         </h1>
         <nav className="flex items-baseline gap-4">
           <Link href="/repaso" className="inline-flex min-h-12 items-center underline">
@@ -15,12 +15,9 @@ export default function ExtraerPage() {
           <Link href="/biblioteca" className="inline-flex min-h-12 items-center underline">
             Biblioteca
           </Link>
-          <Link href="/diccionario" className="inline-flex min-h-12 items-center underline">
-            Diccionario
-          </Link>
         </nav>
       </header>
-      <ExtractForm />
+      <BuscadorDiccionario />
     </main>
   );
 }
