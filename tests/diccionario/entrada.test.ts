@@ -49,6 +49,12 @@ describe("filasDeLinea", () => {
     expect(filasDeLinea("{esto no es json")).toEqual([]);
     expect(filasDeLinea("")).toEqual([]);
   });
+
+  it("devuelve vacío ante JSON válido que no es un objeto", () => {
+    expect(filasDeLinea("null")).toEqual([]);
+    expect(filasDeLinea("123")).toEqual([]);
+    expect(filasDeLinea('"texto"')).toEqual([]);
+  });
 });
 
 describe("esGlosaInutil", () => {

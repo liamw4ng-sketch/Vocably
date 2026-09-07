@@ -42,6 +42,9 @@ export function filasDeLinea(linea: string): FilaDiccionario[] {
     return [];
   }
 
+  // JSON.parse puede devolver null, números, strings, etc. Necesitamos un objeto.
+  if (typeof cruda !== "object" || cruda === null) return [];
+
   const term = typeof cruda.w === "string" ? cruda.w.trim() : "";
   const pos = typeof cruda.p === "string" ? cruda.p : "";
   if (!term || !pos || !Array.isArray(cruda.s)) return [];
