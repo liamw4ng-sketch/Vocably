@@ -19,8 +19,48 @@ Diseño completo: `docs/superpowers/specs/2026-09-06-app-vocabulario-design.md`
    extracciones se fusionan; una traducción editada a mano en la biblioteca no
    se pierde si el término vuelve a salir en una extracción posterior.
 
-La pantalla de extracción vive en `/extraer` y la biblioteca en `/biblioteca`.
-Ambas requieren sesión iniciada; `/` redirige directamente a `/extraer`.
+La pantalla de extracción vive en `/extraer`, la biblioteca en `/biblioteca` y
+el repaso en `/repaso`. Las tres requieren sesión iniciada; `/` redirige
+directamente a `/extraer`.
+
+## Repaso con repetición espaciada
+
+La pantalla `/repaso` muestra, una tarjeta a la vez, las palabras que tocan
+hoy: primero las vencidas y, hasta el tope diario, palabras nuevas de la
+biblioteca. Se pulsa (o se pulsa la barra espaciadora) para ver la traducción
+y el ejemplo, y se valora con uno de cuatro botones — Otra vez / Difícil /
+Bien / Fácil, también accesibles con las teclas 1-4 — que alimentan el
+algoritmo de repetición espaciada FSRS (paquete `ts-fsrs`) y fijan cuándo
+vuelve a tocar esa palabra.
+
+**Esta pantalla no consume la API de Claude en ningún momento.** Sus dos rutas
+— `GET /api/repaso/cola` y `POST /api/repaso/respuesta` — solo leen y escriben
+en Postgres; no hacen ninguna llamada a Anthropic. Lo único que tiene coste en
+toda la aplicación es la extracción de vocabulario desde un PDF (ver
+"Coste" más abajo).
+
+Cada respuesta se envía con un identificador propio (`answerId`) que la
+convierte en idempotente: si la app se cierra a mitad de sesión y una
+respuesta se reintenta al volver, no se duplica en el historial ni se cuenta
+dos veces. El resultado queda escrito en la base de datos en el momento de
+responder, así que cerrar la app y reabrirla no hace reaparecer una tarjeta
+ya respondida en esa misma cola. (Si una tarjeta valorada "Otra vez" vuelve a
+salir al cabo de unos minutos, es el comportamiento normal de FSRS —un paso
+de aprendizaje corto—, no una tarjeta que haya "olvidado" su respuesta.)
+
+Cuántas palabras nuevas al día se introducen es configurable: la tabla
+`settings` (una sola fila) guarda `newCardsPerDay`, con 20 por defecto. Se
+ajusta desde un campo en la propia pantalla de repaso, en la tarjeta de
+resumen que aparece al terminar la sesión — no hay una pantalla de ajustes
+aparte.
+
+### Instalable en el móvil
+
+`app/manifest.ts` define un manifiesto de aplicación web (nombre "Vocably",
+modo `standalone`, icono en `app/icon.png`). Desde un navegador móvil se puede
+añadir a la pantalla de inicio y abrirse como una app independiente, sin la
+barra del navegador. El `start_url` del manifiesto es **`/repaso`**: abrir la
+app desde el icono lleva directamente al repaso del día, no a la extracción.
 
 ## En local
 
@@ -92,21 +132,96 @@ npx eslint .        # estilo y errores comunes
 
 ## Despliegue en Vercel
 
-1. Crear una base de datos gratuita en [Neon](https://neon.tech) y copiar su
-   cadena de conexión (`DATABASE_URL`).
-2. Importar este repositorio en Vercel.
-3. Definir en el proyecto de Vercel las cuatro variables de `.env.example`.
-   `SESSION_SECRET` debe ser una cadena larga y aleatoria (por ejemplo, la
-   salida de `openssl rand -hex 32`); `APP_PASSWORD` es la contraseña con la
-   que se entra.
-4. Aplicar las migraciones contra la base de producción, antes o justo después
-   del primer despliegue:
-   ```bash
-   DATABASE_URL='<cadena de Neon>' npx drizzle-kit push
-   ```
-5. Desplegar.
+Primer despliegue (base de datos nueva): crear una base gratuita en
+[Neon](https://neon.tech) y copiar su cadena de conexión, importar este
+repositorio en Vercel, definir en el proyecto las cuatro variables de
+`.env.example` y aplicar `npx drizzle-kit push` una vez antes o justo después
+del primer despliegue para crear todas las tablas.
+
+Para desplegar esta fase (fase 2) sobre una base de datos que **ya existe y
+tiene vocabulario real**, seguir estos pasos en orden:
+
+### 1. Rotar las credenciales
+
+Generar una API key nueva de Anthropic y una contraseña nueva para la base de
+datos de Neon. Configurar ambas:
+
+- En las variables de entorno del proyecto en el proveedor de hosting
+  (Vercel): `ANTHROPIC_API_KEY` y `DATABASE_URL`.
+- En `.env.local` para desarrollo local, con los mismos valores nuevos.
+
+`.env.local` está en `.gitignore` y no debe llegar nunca a un commit.
+
+### 2. Comprobación previa a la migración
+
+La migración de esta fase añade a `review_logs` una columna `answer_id` que
+es `NOT NULL` y **no tiene valor por defecto**. Si esa tabla ya tuviera filas,
+la migración fallaría a mitad de camino. Antes de tocar nada, conectar con la
+base de producción (por ejemplo desde el editor SQL de Neon, o con `psql`) y
+ejecutar:
+
+```sql
+SELECT count(*) FROM review_logs;
+```
+
+Debe devolver **0**. Si devuelve cualquier otro número, **parar aquí y
+preguntar** antes de seguir: significa que ya hay historial de repasos
+guardado y la migración, tal como está escrita, lo rompería.
+
+De paso, anotar también cuántos términos hay en la biblioteca, para poder
+comprobar después de la migración que no se ha perdido ninguno:
+
+```sql
+SELECT count(*) FROM terms;
+```
+
+### 3. Aplicar la migración
+
+Con la base de datos de Neon ya usando la contraseña nueva del paso 1:
+
+```bash
+DATABASE_URL='<cadena de Neon>' npx drizzle-kit push
+```
+
+Esto crea la tabla `settings` y añade `learning_steps` a `card_states` y
+`answer_id` a `review_logs` (migración `drizzle/0001_adorable_boomerang.sql`).
+`drizzle-kit push` no lee `.env.local`, así que hay que pasarle
+`DATABASE_URL` explícitamente en el propio comando, con la cadena de conexión
+real de Neon.
+
+### 4. Verificar que la migración funcionó
+
+Comprobar que las columnas y la tabla nuevas existen:
+
+```sql
+SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'card_states' AND column_name = 'learning_steps';
+SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'review_logs' AND column_name = 'answer_id';
+SELECT to_regclass('public.settings');
+```
+
+Las tres deben devolver una fila (la tercera, el nombre `settings` en vez de
+`NULL`). Y comprobar que el vocabulario existente sigue intacto, comparando
+con el número anotado en el paso 2:
+
+```sql
+SELECT count(*) FROM terms;
+```
+
+### 5. Desplegar
+
+Con las variables de entorno del paso 1 ya actualizadas en Vercel, desplegar
+esta rama (redeploy manual, o el push/merge que dispare el despliegue
+automático).
 
 ## Coste
+
+La única operación de la app que tiene coste es la extracción de vocabulario
+desde un PDF (la llamada a la API de Claude). El repaso en `/repaso` —
+cargar la cola, responder tarjetas, ajustar el tope de tarjetas nuevas— no
+llama a Anthropic nunca y por tanto no añade coste, por muchas sesiones que
+se hagan al día.
 
 Cada extracción muestra en la interfaz su coste real, calculado a partir de
 los tokens que ha consumido esa llamada. El modelo es `claude-opus-5`: 5 $ por
@@ -119,6 +234,8 @@ términos en la biblioteca costarían menos de 3 €. El diseño estimaba entre 
 cara.
 
 ## Prueba de aceptación
+
+### Fase 1 (extracción y biblioteca)
 
 La fase 1 no se considera terminada hasta comprobar, contra el despliegue real
 y con un PDF propio, todo lo siguiente:
@@ -134,13 +251,34 @@ y con un PDF propio, todo lo siguiente:
 7. Repetir la extracción del mismo rango y comprobar que los términos salen
    como "ya los tenías" y que la corrección no se ha perdido.
 
+### Fase 2 (repaso)
+
+La fase 2 no se considera terminada hasta que, en el móvil y en días
+distintos (esto no se puede comprobar en una sola sesión de un tirón), se
+verifique todo lo siguiente:
+
+- [ ] Instalar la app en la pantalla de inicio y abrirla desde el icono.
+- [ ] Completar una sesión entera con una mano, sin esperas entre tarjetas.
+- [ ] Que al terminar, el resumen (Otra vez / Difícil / Bien / Fácil) cuadre
+      con lo respondido durante la sesión.
+- [ ] Cerrar la app a mitad de una sesión y volver a abrirla: lo ya
+      respondido no debe reaparecer en la cola.
+- [ ] **Al día siguiente:** que las palabras valoradas como "Otra vez"
+      vuelvan a salir y las valoradas como "Fácil" no.
+- [ ] Que el diseño resulte cómodo de usar tras varias sesiones, no solo
+      bonito la primera vez.
+
 ## Estado actual y limitaciones conocidas
 
-- **Fase 1 (esta):** extracción desde PDF y biblioteca editable. Código
-  completo y probado (77 pruebas).
-- **Fase 2 (repaso con repetición espaciada):** no está construida todavía.
-  Las tablas `card_states` y `review_logs` ya existen en el esquema y se
-  rellenan durante la extracción, pero nada las lee ni las usa aún — no se
-  perderá ningún dato cuando se implemente el repaso.
+- **Fase 1:** extracción desde PDF y biblioteca editable. Código completo y
+  probado.
+- **Fase 2 (repaso con repetición espaciada):** construida. Pantalla
+  `/repaso`, algoritmo FSRS, tope diario de tarjetas nuevas configurable
+  (tabla `settings`), manifiesto para instalar la app en el móvil con
+  `start_url` en `/repaso`. No consume la API de Claude en ningún momento
+  (ver "Coste"). Pendiente solo la prueba de aceptación de más arriba, que
+  hace el usuario en su móvil.
+- La suite completa suma **160 pruebas**, ninguna contra la API de Claude ni
+  contra una base de datos real.
 - Si `SESSION_SECRET` falta, el fallo al arrancar es un error genérico de
   Node, no un mensaje claro pensado para esto.
