@@ -90,6 +90,30 @@ export function botonAnadirDeshabilitado(
   return !nivel || numTraducciones === 0 || enCurso;
 }
 
+/**
+ * El único punto de esta pantalla que cuesta dinero: pide a Claude una
+ * traducción curada para una acepción concreta. Función pura, igual que
+ * `buscarTermino` y `anadirAcepcion`, para poder probarla sin jsdom.
+ */
+export async function afinarConIA(
+  entryId: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string[]> {
+  let res: Response;
+  try {
+    res = await fetchImpl("/api/diccionario/afinar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entryId }),
+    });
+  } catch {
+    throw new Error("No se pudo afinar: comprueba la conexión.");
+  }
+  const cuerpo = await res.json();
+  if (!res.ok) throw new Error(cuerpo.error ?? "No se pudo afinar.");
+  return cuerpo.translations as string[];
+}
+
 export function BuscadorDiccionario() {
   const [consulta, setConsulta] = useState("");
   const [resultado, setResultado] = useState<Resultado | null>(null);
@@ -100,6 +124,10 @@ export function BuscadorDiccionario() {
   // Por acepción, no global: hay varias tarjetas en pantalla a la vez y
   // bloquear todas mientras se guarda una sería peor que el bug que arregla.
   const [guardandoIds, setGuardandoIds] = useState<Set<number>>(new Set());
+  // Mismo patrón que guardandoIds: afinar es la única llamada que cuesta
+  // dinero, así que el doble clic que dispararía dos peticiones es aquí el
+  // doble de grave.
+  const [afinandoIds, setAfinandoIds] = useState<Set<number>>(new Set());
 
   async function buscar(evento: React.FormEvent) {
     evento.preventDefault();
@@ -131,6 +159,35 @@ export function BuscadorDiccionario() {
       setError(e instanceof Error ? e.message : "No se pudo añadir.");
     } finally {
       setGuardandoIds((previas) => {
+        const siguientes = new Set(previas);
+        siguientes.delete(acepcion.id);
+        return siguientes;
+      });
+    }
+  }
+
+  async function afinar(acepcion: Acepcion) {
+    if (afinandoIds.has(acepcion.id)) return;
+    setError("");
+    setAfinandoIds((previas) => new Set(previas).add(acepcion.id));
+    try {
+      const translations = await afinarConIA(acepcion.id);
+      // Sustituye las traducciones de esa ficha en el estado, igual que
+      // `anadir` marca la ficha como guardada: sin recargar toda la búsqueda.
+      setResultado((previo) =>
+        previo
+          ? {
+              ...previo,
+              acepciones: previo.acepciones.map((a) =>
+                a.id === acepcion.id ? { ...a, translations } : a,
+              ),
+            }
+          : previo,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo afinar.");
+    } finally {
+      setAfinandoIds((previas) => {
         const siguientes = new Set(previas);
         siguientes.delete(acepcion.id);
         return siguientes;
@@ -180,6 +237,21 @@ export function BuscadorDiccionario() {
             ) : (
               <p className="text-texto-suave">Sin traducción al español.</p>
             )}
+
+            <div className="flex flex-col items-start gap-1">
+              <Boton
+                variante="secundario"
+                onClick={() => afinar(acepcion)}
+                disabled={afinandoIds.has(acepcion.id)}
+              >
+                {afinandoIds.has(acepcion.id) ? "Afinando…" : "Afinar con IA"}
+              </Boton>
+              {/* El usuario tiene que saber que esto cuesta dinero antes de pulsar:
+                  es el único punto de pago de toda la pantalla. */}
+              <p style={{ fontSize: "var(--tamano-1)" }} className="text-texto-suave">
+                Afinar cuesta unos céntimos. Todo lo demás de esta pantalla es gratis.
+              </p>
+            </div>
 
             {acepcion.yaGuardada || guardadas.has(acepcion.id) ? (
               <p className="text-texto-suave">Ya está en tu repaso.</p>

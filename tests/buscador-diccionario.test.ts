@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { buscarTermino, anadirAcepcion, botonAnadirDeshabilitado } from "@/components/BuscadorDiccionario";
+import {
+  buscarTermino,
+  anadirAcepcion,
+  botonAnadirDeshabilitado,
+  afinarConIA,
+} from "@/components/BuscadorDiccionario";
 
 const acepcion = {
   id: 1,
@@ -81,6 +86,34 @@ describe("anadirAcepcion", () => {
     await expect(
       anadirAcepcion(acepcion, "B1", fetchFalso as unknown as typeof fetch),
     ).rejects.toThrow("Elige un nivel del MCER.");
+  });
+});
+
+describe("afinarConIA", () => {
+  it("manda el id de la acepción y devuelve las traducciones afinadas", async () => {
+    const fetchFalso = fetchQueDevuelve({ translations: ["reacio", "poco dispuesto"], costUsd: 0.001 });
+    const traducciones = await afinarConIA(1, fetchFalso as unknown as typeof fetch);
+
+    const [url, opciones] = fetchFalso.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/diccionario/afinar");
+    expect(JSON.parse(String(opciones.body))).toEqual({ entryId: 1 });
+    expect(traducciones).toEqual(["reacio", "poco dispuesto"]);
+  });
+
+  it("propaga el error del servidor con su mensaje", async () => {
+    const fetchFalso = fetchQueDevuelve({ error: "Esa acepción no existe." }, 404);
+    await expect(afinarConIA(1, fetchFalso as unknown as typeof fetch)).rejects.toThrow(
+      "Esa acepción no existe.",
+    );
+  });
+
+  it("un fallo de red no se propaga sin mensaje", async () => {
+    const fetchFalso = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    await expect(
+      afinarConIA(1, fetchFalso as unknown as typeof fetch),
+    ).rejects.toThrow(/no se pudo afinar/i);
   });
 });
 
