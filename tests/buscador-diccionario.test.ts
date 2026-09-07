@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { buscarTermino, anadirAcepcion } from "@/components/BuscadorDiccionario";
+import { buscarTermino, anadirAcepcion, botonAnadirDeshabilitado } from "@/components/BuscadorDiccionario";
 
 const acepcion = {
   id: 1,
@@ -81,5 +81,23 @@ describe("anadirAcepcion", () => {
     await expect(
       anadirAcepcion(acepcion, "B1", fetchFalso as unknown as typeof fetch),
     ).rejects.toThrow("Elige un nivel del MCER.");
+  });
+});
+
+describe("botonAnadirDeshabilitado", () => {
+  it("se deshabilita sin nivel elegido", () => {
+    expect(botonAnadirDeshabilitado("", 1, false)).toBe(true);
+  });
+
+  it("se deshabilita sin traducción al español", () => {
+    expect(botonAnadirDeshabilitado("B1", 0, false)).toBe(true);
+  });
+
+  it("se deshabilita mientras la petición de esta tarjeta está en vuelo, aunque nivel y traducción ya estén listos", () => {
+    expect(botonAnadirDeshabilitado("B1", 1, true)).toBe(true);
+  });
+
+  it("se habilita con nivel, traducción y sin ninguna petición en vuelo", () => {
+    expect(botonAnadirDeshabilitado("B1", 1, false)).toBe(false);
   });
 });

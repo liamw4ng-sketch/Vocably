@@ -74,6 +74,22 @@ export async function anadirAcepcion(
   if (!res.ok) throw new Error((await res.json()).error ?? "No se pudo añadir.");
 }
 
+/**
+ * Si el botón "Añadir" debe estar deshabilitado: sin nivel elegido, sin
+ * traducción al español, o con la petición de esta tarjeta ya en vuelo —esto
+ * último evita el doble clic que mandaría dos `POST /api/terms` antes de que
+ * `guardadas` se actualice y oculte el botón. Extraída como función pura para
+ * poder probarla: el resto del estado de este componente es React puro y no
+ * se puede probar sin jsdom, pero esta combinación de condiciones sí.
+ */
+export function botonAnadirDeshabilitado(
+  nivel: string,
+  numTraducciones: number,
+  enCurso: boolean,
+): boolean {
+  return !nivel || numTraducciones === 0 || enCurso;
+}
+
 export function BuscadorDiccionario() {
   const [consulta, setConsulta] = useState("");
   const [resultado, setResultado] = useState<Resultado | null>(null);
@@ -81,6 +97,9 @@ export function BuscadorDiccionario() {
   const [error, setError] = useState("");
   const [niveles, setNiveles] = useState<Record<number, string>>({});
   const [guardadas, setGuardadas] = useState<Set<number>>(new Set());
+  // Por acepción, no global: hay varias tarjetas en pantalla a la vez y
+  // bloquear todas mientras se guarda una sería peor que el bug que arregla.
+  const [guardandoIds, setGuardandoIds] = useState<Set<number>>(new Set());
 
   async function buscar(evento: React.FormEvent) {
     evento.preventDefault();
@@ -99,11 +118,23 @@ export function BuscadorDiccionario() {
   }
 
   async function anadir(acepcion: Acepcion) {
+    // Guarda extra por si el botón llega a pulsarse dos veces antes de que el
+    // primer render deshabilitado se pinte: sin esto, dos POST en vuelo a la
+    // vez para la misma tarjeta.
+    if (guardandoIds.has(acepcion.id)) return;
+    setError("");
+    setGuardandoIds((previas) => new Set(previas).add(acepcion.id));
     try {
       await anadirAcepcion(acepcion, niveles[acepcion.id] ?? "");
       setGuardadas((previas) => new Set(previas).add(acepcion.id));
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo añadir.");
+    } finally {
+      setGuardandoIds((previas) => {
+        const siguientes = new Set(previas);
+        siguientes.delete(acepcion.id);
+        return siguientes;
+      });
     }
   }
 
@@ -168,9 +199,13 @@ export function BuscadorDiccionario() {
                 />
                 <Boton
                   onClick={() => anadir(acepcion)}
-                  disabled={!niveles[acepcion.id] || acepcion.translations.length === 0}
+                  disabled={botonAnadirDeshabilitado(
+                    niveles[acepcion.id] ?? "",
+                    acepcion.translations.length,
+                    guardandoIds.has(acepcion.id),
+                  )}
                 >
-                  Añadir
+                  {guardandoIds.has(acepcion.id) ? "Añadiendo…" : "Añadir"}
                 </Boton>
               </div>
             )}
