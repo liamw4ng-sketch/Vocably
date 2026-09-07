@@ -43,3 +43,6 @@ next-env.d.ts
 
 # worktrees locales de Claude Code (checkouts de otras sesiones)
 .claude/worktrees/
+
+# andamiaje de ejecución de planes (no forma parte del proyecto)
+/.superpowers/

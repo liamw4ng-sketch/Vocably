@@ -15,6 +15,9 @@ export default function BibliotecaPage() {
           <Link href="/extraer" className="inline-flex min-h-12 items-center underline">
             Extraer
           </Link>
+          <Link href="/diccionario" className="inline-flex min-h-12 items-center underline">
+            Diccionario
+          </Link>
         </nav>
       </header>
       <TermTable />

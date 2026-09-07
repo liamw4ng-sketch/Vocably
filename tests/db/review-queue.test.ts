@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
+import { anadirDesdeDiccionario } from "@/db/repository/diccionario";
 import { setNewCardsPerDay, setReviewsPerSession } from "@/db/repository/settings";
 import {
   getDueQueue,
@@ -418,6 +419,31 @@ describe("getDueQueue", () => {
     const { cartas } = await getDueQueue(db, { now: AHORA, aleatorio: generador(1) });
     expect(cartas.filter((c) => c.esNueva)).toHaveLength(5);
     expect(cartas.filter((c) => !c.esNueva)).toHaveLength(2);
+  });
+
+  it("la cola trae la pista de la acepción", async () => {
+    const { termId } = await anadirDesdeDiccionario(db, {
+      term: "bank",
+      pos: "noun",
+      gloss: "An edge of a river.",
+      example: "We sat on the bank.",
+      translation: "orilla",
+      level: "B1",
+    });
+    await madurar([termId]);
+
+    const { cartas } = await getDueQueue(db, { now: AHORA });
+    expect(cartas).toHaveLength(1);
+    expect(cartas[0].senseHint).toBe("An edge of a river.");
+  });
+
+  it("lo extraído de un PDF no lleva pista", async () => {
+    await saveExtraction(db, { ...base, items: [termino(1)] });
+    const [tarjeta] = await db.select().from(cardStates);
+    await madurar([tarjeta.termId]);
+
+    const { cartas } = await getDueQueue(db, { now: AHORA });
+    expect(cartas[0].senseHint).toBe("");
   });
 });
 

@@ -19,9 +19,9 @@ Diseño completo: `docs/superpowers/specs/2026-09-06-app-vocabulario-design.md`
    extracciones se fusionan; una traducción editada a mano en la biblioteca no
    se pierde si el término vuelve a salir en una extracción posterior.
 
-La pantalla de extracción vive en `/extraer`, la biblioteca en `/biblioteca` y
-el repaso en `/repaso`. Las tres requieren sesión iniciada; `/` redirige
-directamente a `/extraer`.
+La pantalla de extracción vive en `/extraer`, la biblioteca en `/biblioteca`,
+el repaso en `/repaso` y la búsqueda en el diccionario en `/diccionario`. Las
+cuatro requieren sesión iniciada; `/` redirige directamente a `/extraer`.
 
 ## Repaso con repetición espaciada
 
@@ -86,6 +86,105 @@ modo `standalone`, icono en `app/icon.png`). Desde un navegador móvil se puede
 añadir a la pantalla de inicio y abrirse como una app independiente, sin la
 barra del navegador. El `start_url` del manifiesto es **`/repaso`**: abrir la
 app desde el icono lleva directamente al repaso del día, no a la extracción.
+
+## Diccionario
+
+Extraer de un PDF no es la única forma de meter vocabulario. La pantalla
+`/diccionario` es la segunda puerta: se busca una palabra suelta y se añade a
+la biblioteca con un botón, con la misma estructura que ya usa la app —
+palabra, significado, ejemplo— y el nivel del MCER puesto a mano (sin nivel
+elegido, el botón no guarda).
+
+La búsqueda recorre cuatro escalones y se para en el primero que responde:
+
+| # | Dónde busca | Tarda | Cuesta |
+|---|---|---|---|
+| 1 | La biblioteca del usuario | instantáneo | 0 € |
+| 2 | La tabla del diccionario (cargada de Wikcionario, ver más abajo) | instantáneo | 0 € |
+| 3 | El traductor MyMemory, solo si a la entrada le falta el español | ~1 s (5 s como mucho), y se guarda si la acepción es única | 0 € |
+| 4 | Claude, solo si se pulsa "Afinar con IA" | ~3 s | unos céntimos |
+
+Si el término ya está en la biblioteca, la pantalla abre con un bloque **"Ya
+en tu repaso"** —la traducción guardada, el nivel y cuándo vuelve a tocar— y
+esa acepción no se ofrece para añadirla otra vez; las demás sí. Una palabra
+guardada que Wikcionario no trae sale ahí igualmente: decir que "no está en el
+diccionario" algo que el usuario ya tiene sería mentira. `GET /api/diccionario` resuelve los escalones 1
+a 3; **no llama a Claude nunca**. El escalón 4 vive aparte, en
+`POST /api/diccionario/afinar`, precisamente para que se vea de un vistazo que
+ninguna otra ruta del diccionario toca la API.
+
+### La pista en inglés
+
+Una palabra puede tener más de un significado que interesa guardar por
+separado: *bank* es la orilla de un río y también donde se guarda el dinero.
+El diccionario permite guardar las dos acepciones del mismo término,
+distinguidas por una pista —su significado en inglés— guardada en la columna
+`senseHint` de `terms`. El índice único de `terms` es ahora sobre
+`(term_normalized, sense_hint)`, no solo sobre el término.
+
+En el repaso, esa pista aparece pequeña bajo la palabra, en la cara delantera
+de la tarjeta y recortada a una línea: dice lo bastante para distinguir *bank*
+→ orilla de *bank* → banco sin chivar la traducción al español antes de
+tiempo.
+
+### La fuente "Diccionario"
+
+Las palabras añadidas a mano desde `/diccionario` cuelgan de una fuente
+llamada **"Diccionario"**, con 0 páginas y coste 0 €, creada la primera vez
+que hace falta (`POST /api/terms`, vía `anadirDesdeDiccionario`). Así la
+biblioteca puede filtrar entre lo buscado a mano y lo extraído de un PDF, sin
+tener que tocar el esquema de `sources` para distinguirlos.
+
+### El traductor
+
+El diccionario en sí (ver "Cargar el diccionario" más abajo) trae español en
+muy pocas entradas: solo el 1,8 % de lo cargado. El resto se traduce con
+**MyMemory**, un servicio gratuito. Se manda solo el término suelto, nunca
+pegado a su definición: probado a mano, pegarlos rompe la traducción (*"come
+across: to give an impression"* vuelve como *"venir a través: para dar una
+impresión"*, partiendo el verbo frasal en dos).
+
+La traducción se guarda en su fila del diccionario **solo cuando el término
+tiene una única acepción sin español**. Ahí, y solo ahí, la respuesta es de
+verdad de esa acepción: al traductor se le manda el término suelto, así que lo
+que vuelve es la traducción de la palabra, no la de un significado concreto.
+Si hay varias acepciones sin español —*bank* tiene siete entradas—, la
+traducción se enseña en todas pero no se cachea en ninguna: escribir "banco"
+en la acepción de orilla y darla por buena la dejaría mal para siempre,
+porque una fila cacheada no se vuelve a consultar. Preguntar otra vez es
+gratis; equivocarse en la base, no.
+
+La llamada se corta a los cinco segundos (`AbortSignal.timeout`). Un servicio
+caído ya estaba cubierto, pero uno colgado dejaba esperando a la búsqueda
+entera, que para entonces ya tiene el significado y el ejemplo listos para
+enseñar. Si MyMemory no contesta, la ficha sale igual sin español y quedan dos
+salidas: **escribir la traducción a mano** en la propia ficha, que es gratis y
+es la que manda si se usa, o el botón "Afinar con IA", que cuesta unos
+céntimos.
+
+### Cargar el diccionario
+
+La tabla `dictionary_entries` sale de un volcado de Wikcionario en inglés (vía
+kaikki.org), filtrado a las categorías útiles —sustantivo, verbo, adjetivo,
+adverbio, expresión, verbo frasal, interjección— y a las 50.000 palabras
+sueltas más frecuentes del inglés; las expresiones de varias palabras
+(verbos frasales, idioms) entran todas, sin filtro de frecuencia porque no
+aparecen en ninguna lista de frecuencia. Resultado: **181.103 entradas, unos
+36 MB** una vez en Postgres.
+
+Cargarla es un paso manual que hace una persona **una vez**, igual que
+`drizzle-kit push`: no forma parte del arranque de la app ni se repite en cada
+despliegue, porque el diccionario no cambia. El fichero de datos
+(`dicc_todo.jsonl.gz`) vive fuera de este repositorio.
+
+```bash
+DATABASE_URL='...' npm run cargar:diccionario -- ~/Vocably-diccionario/dicc_todo.jsonl.gz
+```
+
+El script vacía la tabla y la vuelve a llenar entera: para 181.103 filas es
+más simple y más seguro que intentar fusionar fila a fila, y el diccionario es
+material de consulta, no datos del usuario, así que no hay nada que perder al
+recargarlo.
 
 ## En local
 
@@ -247,11 +346,13 @@ automático).
 
 ## Coste
 
-La única operación de la app que tiene coste es la extracción de vocabulario
-desde un PDF (la llamada a la API de Claude). El repaso en `/repaso` —
-cargar la cola, responder tarjetas, cambiar los ajustes— no
-llama a Anthropic nunca y por tanto no añade coste, por muchas sesiones que
-se hagan al día.
+Dos operaciones de la app tienen coste, porque son las únicas que llaman a la
+API de Claude: la extracción de vocabulario desde un PDF, y el botón "Afinar
+con IA" de `/diccionario`, que el usuario pulsa a voluntad. Todo lo demás —
+el repaso en `/repaso` (cargar la cola, responder tarjetas, cambiar los
+ajustes) y la búsqueda en `/diccionario` (la biblioteca, la tabla del
+diccionario y el traductor MyMemory, sus tres primeros escalones)— no llama a
+Anthropic nunca y no añade coste, por muchas veces que se use.
 
 Cada extracción muestra en la interfaz su coste real, calculado a partir de
 los tokens que ha consumido esa llamada. El modelo es `claude-opus-5`: 5 $ por
@@ -262,6 +363,15 @@ términos por unos 0,07 €, es decir alrededor de 0,003 € por término. Mil
 términos en la biblioteca costarían menos de 3 €. El diseño estimaba entre 15 y
 30 céntimos por 7-8 páginas; la realidad ha salido aproximadamente la mitad de
 cara.
+
+"Afinar con IA" usa el mismo modelo y la misma fórmula de coste, pero por
+palabra suelta en vez de por lote de páginas; en la pantalla no se muestra un
+importe calculado, solo el aviso fijo "Afinar cuesta unos céntimos. Todo lo
+demás de esta pantalla es gratis."
+
+El botón desaparece en cuanto la acepción está guardada: afinar reescribe la
+caché del diccionario, no la ficha ya creada en `terms`, así que pulsarlo
+entonces cobraría por un cambio que la tarjeta de repaso no llegaría a ver.
 
 ## Prueba de aceptación
 
@@ -312,8 +422,8 @@ verifique todo lo siguiente:
   manifiesto para instalar la app en el móvil con `start_url` en `/repaso`. No
   consume la API de Claude en ningún momento (ver "Coste"). Pendiente solo la
   prueba de aceptación de más arriba, que hace el usuario en su móvil.
-- La suite completa suma **197 pruebas**, ninguna contra la API de Claude ni
-  contra una base de datos real.
+- La suite completa suma **304 pruebas**, ninguna contra la API de Claude ni
+  contra MyMemory ni contra una base de datos real.
 - **No hay pruebas de componentes.** Vitest corre con `environment: "node"`,
   sin jsdom ni Testing Library, así que ninguna prueba puede pulsar un botón
   ni comprobar qué se pinta. Lo que se prueba de la interfaz son sus funciones

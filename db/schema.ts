@@ -6,6 +6,7 @@ import {
   timestamp,
   doublePrecision,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
 
 export const sources = pgTable("sources", {
@@ -31,9 +32,20 @@ export const terms = pgTable(
     level: text("level").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    /**
+     * El significado en inglés de la acepción guardada. Vacío en todo lo que
+     * viene de un PDF, que es como se conserva el comportamiento anterior:
+     * la clave de deduplicación de una extracción sigue siendo el término solo.
+     * Se muestra en la cara delantera de la tarjeta para distinguir
+     * `bank` → orilla de `bank` → banco sin adelantar la respuesta en español.
+     */
+    senseHint: text("sense_hint").notNull().default(""),
   },
   (table) => ({
-    termNormalizedIdx: uniqueIndex("terms_term_normalized_idx").on(table.termNormalized),
+    termNormalizedIdx: uniqueIndex("terms_term_normalized_idx").on(
+      table.termNormalized,
+      table.senseHint,
+    ),
   }),
 );
 
@@ -94,3 +106,30 @@ export const settings = pgTable("settings", {
   /** Cuántos repasos de palabras ya aprendidas entran en cada sesión. 0 = todos los que venzan. */
   reviewsPerSession: integer("reviews_per_session").notNull().default(0),
 });
+
+/**
+ * El diccionario de consulta: una fila por acepción. Se carga una vez desde el
+ * volcado de Wikcionario y no se vuelve a escribir, salvo la traducción, que se
+ * cachea la primera vez que alguien busca el término.
+ *
+ * No lleva índice único: la gracia es justo que un término tenga varias
+ * acepciones (`bank` tiene siete entradas en Wikcionario, una por etimología).
+ */
+export const dictionaryEntries = pgTable(
+  "dictionary_entries",
+  {
+    id: serial("id").primaryKey(),
+    termNormalized: text("term_normalized").notNull(),
+    term: text("term").notNull(),
+    pos: text("pos").notNull(),
+    /** El significado, en inglés: es donde Wikcionario es fuerte. */
+    gloss: text("gloss").notNull(),
+    example: text("example"),
+    translations: text("translations").array().notNull().default([]),
+    /** `wiktionary` | `mymemory` | `claude`. Nulo mientras no haya traducción. */
+    translationSource: text("translation_source"),
+  },
+  (table) => ({
+    termNormalizedIdx: index("dictionary_entries_term_normalized_idx").on(table.termNormalized),
+  }),
+);

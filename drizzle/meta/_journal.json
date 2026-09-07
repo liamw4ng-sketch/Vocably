@@ -22,6 +22,20 @@
       "when": 1788780029717,
       "tag": "0002_little_yellowjacket",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788787439815,
+      "tag": "0003_lame_cassandra_nova",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788789511318,
+      "tag": "0004_youthful_zarda",
+      "breakpoints": true
     }
   ]
 }

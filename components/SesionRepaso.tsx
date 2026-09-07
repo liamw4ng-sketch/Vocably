@@ -188,6 +188,21 @@ function partirPorTermino(frase: string, termino: string): Trozo[] {
   return trozos;
 }
 
+/**
+ * Si la frase de contexto aporta algo por encima de la pista.
+ *
+ * Lo añadido desde el diccionario guarda la misma glosa inglesa en las dos: no
+ * hay libro detrás del que sacar una frase, así que el contexto más honesto es
+ * el significado. Pintarla dos veces —recortada a una línea arriba y entera y
+ * más grande justo debajo— anula el motivo de recortarla. Se compara al
+ * mostrar, no al guardar, para que también arregle las fichas ya creadas.
+ */
+export function mostrarContexto(context: string, senseHint: string): boolean {
+  const frase = context.trim();
+  if (!frase) return false;
+  return frase !== senseHint.trim();
+}
+
 function Frase({
   frase,
   termino,
@@ -666,7 +681,16 @@ export function SesionRepaso() {
             <p style={TEXTO_6} className="font-serif break-words">
               {carta.term}
             </p>
-            {carta.context ? (
+            {carta.senseHint ? (
+              <p
+                className="line-clamp-1 text-texto-suave"
+                style={TEXTO_1}
+                title={carta.senseHint}
+              >
+                {carta.senseHint}
+              </p>
+            ) : null}
+            {mostrarContexto(carta.context, carta.senseHint) ? (
               <Frase
                 frase={carta.context}
                 termino={carta.term}

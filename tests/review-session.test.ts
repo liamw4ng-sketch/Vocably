@@ -4,8 +4,8 @@ import { crearSesion, type EnvioRespuesta } from "@/lib/review-session";
 const plazos = { 1: "1 min", 2: "10 min", 3: "1 día", 4: "4 días" };
 
 const cartas = [
-  { termId: 1, term: "a", translation: "a", type: "word", level: "B2", context: "c1", example: "e1", esNueva: true, plazos },
-  { termId: 2, term: "b", translation: "b", type: "word", level: "B2", context: "c2", example: "e2", esNueva: true, plazos },
+  { termId: 1, term: "a", translation: "a", type: "word", level: "B2", senseHint: "", context: "c1", example: "e1", esNueva: true, plazos },
+  { termId: 2, term: "b", translation: "b", type: "word", level: "B2", senseHint: "", context: "c2", example: "e2", esNueva: true, plazos },
 ];
 
 const ok = () => Promise.resolve({ aplicada: true, proximaFecha: new Date() });

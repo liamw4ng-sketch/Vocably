@@ -10,6 +10,7 @@ let closeDb: () => Promise<void>;
 vi.mock("@/db/client", () => ({ getDb: () => testDb }));
 
 import { PATCH, DELETE } from "@/app/api/terms/[id]/route";
+import { POST } from "@/app/api/terms/route";
 
 function patchRequest(id: string, body: unknown) {
   return new Request(`http://localhost/api/terms/${id}`, {
@@ -226,5 +227,128 @@ describe("/api/terms/[id]", () => {
       expect(response.status).toBe(200);
       expect(await listTerms(testDb, {})).toHaveLength(1);
     });
+  });
+});
+
+function postRequest(body: unknown) {
+  return new Request("http://localhost/api/terms", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("POST /api/terms", () => {
+  beforeEach(async () => {
+    ({ db: testDb, close: closeDb } = await createTestDb());
+  });
+
+  afterEach(async () => {
+    await closeDb();
+  });
+
+  it("guarda la acepción y responde 201", async () => {
+    const res = await POST(
+      postRequest({
+        term: "bank",
+        pos: "noun",
+        gloss: "An edge of a river.",
+        example: "We sat on the bank.",
+        translation: "orilla",
+        level: "B1",
+      }),
+    );
+    expect(res.status).toBe(201);
+    const [row] = await listTerms(testDb, {});
+    expect(row.term).toBe("bank");
+    expect(row.translation).toBe("orilla");
+  });
+
+  it("un pos con espacios sobrantes sigue clasificando el verbo frasal como tal", async () => {
+    const res = await POST(
+      postRequest({
+        term: "put up with",
+        pos: " verb ",
+        gloss: "To tolerate.",
+        translation: "aguantar",
+        level: "B2",
+      }),
+    );
+    expect(res.status).toBe(201);
+    const [row] = await listTerms(testDb, {});
+    // Sin recortar `pos`, "verb " no es "verb" y el término caía en
+    // "expression", que es otro filtro y otra etiqueta en la tarjeta.
+    expect(row.type).toBe("phrasal_verb");
+  });
+
+  it("sin nivel responde 400 y no guarda nada", async () => {
+    const res = await POST(
+      postRequest({ term: "bank", pos: "noun", gloss: "x", translation: "orilla" }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("nivel");
+    expect(await listTerms(testDb, {})).toHaveLength(0);
+  });
+
+  it("term numérico devuelve 400, no revienta", async () => {
+    const res = await POST(
+      postRequest({
+        term: 123,
+        pos: "noun",
+        gloss: "A number.",
+        translation: "número",
+        level: "A1",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("término");
+    expect(await listTerms(testDb, {})).toHaveLength(0);
+  });
+
+  it("example numérico devuelve 400", async () => {
+    const res = await POST(
+      postRequest({
+        term: "bank",
+        pos: "noun",
+        gloss: "A financial institution.",
+        example: 42,
+        translation: "banco",
+        level: "A1",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("ejemplo");
+    expect(await listTerms(testDb, {})).toHaveLength(0);
+  });
+
+  it("example ausente sigue funcionando", async () => {
+    const res = await POST(
+      postRequest({
+        term: "bank",
+        pos: "noun",
+        gloss: "A financial institution.",
+        translation: "banco",
+        level: "A1",
+      }),
+    );
+    expect(res.status).toBe(201);
+    const [row] = await listTerms(testDb, {});
+    expect(row.term).toBe("bank");
+  });
+
+  it("example null explícito sigue funcionando", async () => {
+    const res = await POST(
+      postRequest({
+        term: "bank",
+        pos: "noun",
+        gloss: "A financial institution.",
+        example: null,
+        translation: "banco",
+        level: "A1",
+      }),
+    );
+    expect(res.status).toBe(201);
+    const [row] = await listTerms(testDb, {});
+    expect(row.term).toBe("bank");
   });
 });
