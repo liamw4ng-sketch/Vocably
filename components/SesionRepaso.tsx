@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CartaCola } from "@/db/repository/review";
+import { TOPE_MAXIMO_TARJETAS_NUEVAS } from "@/db/repository/settings";
 import { crearSesion, type EnvioRespuesta, type Sesion, type Valoracion } from "@/lib/review-session";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
@@ -60,10 +61,6 @@ async function enviarRespuesta(envio: EnvioRespuesta): Promise<unknown> {
   return respuesta.json();
 }
 
-/** Mismo límite que valida `/api/ajustes/route.ts`: se repite aquí solo para
- * poder avisar sin esperar a la red, el servidor sigue siendo quien manda. */
-const TOPE_MAXIMO_TARJETAS_NUEVAS = 200;
-
 async function pedirTope(): Promise<number> {
   const respuesta = await fetch("/api/ajustes");
   if (!respuesta.ok) throw new Error(`respuesta ${respuesta.status}`);
@@ -71,13 +68,21 @@ async function pedirTope(): Promise<number> {
   return cuerpo.newCardsPerDay;
 }
 
-/** Devuelve el tope guardado, o un mensaje de error en español si el servidor lo rechazó. */
-async function guardarTope(valor: number): Promise<{ tope: number } | { error: string }> {
-  const respuesta = await fetch("/api/ajustes", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ newCardsPerDay: valor }),
-  });
+/** Devuelve el tope guardado, o un mensaje de error en español si el servidor
+ * lo rechazó o si la petición ni siquiera pudo hacerse (sin conexión, DNS,
+ * servidor caído): en ese caso `fetch` lanza, y sin capturarlo aquí la
+ * llamante se quedaría con el `await` colgado para siempre. */
+export async function guardarTope(valor: number): Promise<{ tope: number } | { error: string }> {
+  let respuesta: Response;
+  try {
+    respuesta = await fetch("/api/ajustes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ newCardsPerDay: valor }),
+    });
+  } catch {
+    return { error: "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo otra vez." };
+  }
   const cuerpo = (await respuesta.json().catch(() => null)) as
     | { newCardsPerDay?: number; error?: string }
     | null;
@@ -163,14 +168,25 @@ export function SesionRepaso() {
   const [guardando, setGuardando] = useState(false);
   const [adelantado, setAdelantado] = useState(false);
   // `Sesion` es un objeto mutable sin React dentro: hay que pedir el redibujo.
-  const [, redibujar] = useReducer((n: number) => n + 1, 0);
+  // `version` se expone (antes se descartaba) para poder usarlo como
+  // dependencia del efecto de carga del tope, más abajo: es la señal de "algo
+  // relevante ha cambiado" que ese efecto necesita para volver a comprobar si
+  // la sesión ya terminó.
+  const [version, redibujar] = useReducer((n: number) => n + 1, 0);
 
   // Control del tope de tarjetas nuevas, mostrado solo en la pantalla de fin
-  // de sesión. `tope === null` significa "aún no se ha pedido al servidor".
+  // de sesión. `tope === null` significa "aún no se ha pedido al servidor,
+  // o la petición falló" — cuál de las dos es `topeCargaFallo`, más abajo.
   const [tope, setTope] = useState<number | null>(null);
   const [topeBorrador, setTopeBorrador] = useState("");
   const [topeError, setTopeError] = useState("");
   const [topeGuardando, setTopeGuardando] = useState(false);
+  const [topeCargaFallo, setTopeCargaFallo] = useState(false);
+  // Si el GET fallara, `tope` seguiría siendo `null` para siempre y nada
+  // distinguiría "aún no pedido" de "pedido y fallido" — el efecto de abajo
+  // volvería a intentarlo en cada render. Este ref es la señal real de
+  // "ya lo hemos intentado", independiente del resultado.
+  const topeSolicitadoRef = useRef(false);
 
   // Se lee dentro de callbacks async (valorar) para no tocar estado tras
   // desmontar, igual que el guard `cancelado` del efecto de carga inicial de
@@ -207,14 +223,20 @@ export function SesionRepaso() {
     };
   }, []);
 
-  // Sin array de dependencias: se comprueba en cada render si la sesión ya
-  // terminó (no hay forma de saberlo de antemano, `sesion` es el mismo objeto
-  // mutable durante toda la sesión, solo cambia lo que devuelve cartaActual).
-  // El guard `tope !== null` hace que la petición solo se dispare una vez.
+  // `sesion` no cambia de referencia durante toda la sesión (es un objeto
+  // mutable), así que la única señal de "puede que la sesión acabe de
+  // terminar" es `version`: se incrementa en cada `redibujar()`, que
+  // `valorar` llama después de responder cada tarjeta, incluida la última.
+  // El guard real de "no lo pidas dos veces" es `topeSolicitadoRef`, no el
+  // resultado de la petición: así, si el GET falla, no se reintenta en cada
+  // render (incluidos los que no tienen nada que ver, como el de la barra
+  // espaciadora) — se intenta una vez y, si falla, se informa con
+  // `topeCargaFallo` en vez de martillear el servidor.
   useEffect(() => {
-    if (!sesion || tope !== null) return;
+    if (!sesion || topeSolicitadoRef.current) return;
     if (sesion.progreso().total === 0 || sesion.cartaActual()) return;
 
+    topeSolicitadoRef.current = true;
     let cancelado = false;
     pedirTope()
       .then((valor) => {
@@ -224,13 +246,14 @@ export function SesionRepaso() {
         }
       })
       .catch(() => {
-        // Si esto falla no bloqueamos el cierre de la sesión: el control de
-        // tope simplemente no aparece.
+        // No bloqueamos el cierre de la sesión, pero sí lo decimos: sin esto
+        // el control simplemente no aparecía y nada explicaba por qué.
+        if (!cancelado) setTopeCargaFallo(true);
       });
     return () => {
       cancelado = true;
     };
-  });
+  }, [sesion, version]);
 
   /** Reintentar tras un error, o adelantar palabras nuevas: siempre desde un evento. */
   const recargar = useCallback(async (adelantar: boolean) => {
@@ -273,16 +296,24 @@ export function SesionRepaso() {
 
     setTopeGuardando(true);
     setTopeError("");
-    const resultado = await guardarTope(valor);
-    if (!montadoRef.current) return;
-    setTopeGuardando(false);
-    if ("error" in resultado) {
-      setTopeError(resultado.error);
-      setTopeBorrador(String(tope ?? valor));
-      return;
+    try {
+      const resultado = await guardarTope(valor);
+      if (!montadoRef.current) return;
+      if ("error" in resultado) {
+        setTopeError(resultado.error);
+        setTopeBorrador(String(tope ?? valor));
+        return;
+      }
+      setTope(resultado.tope);
+      setTopeBorrador(String(resultado.tope));
+    } finally {
+      // `finally` en vez de un `setTopeGuardando(false)` tras el `await`:
+      // así el campo se reactiva pase lo que pase, incluso si `guardarTope`
+      // (u otra cosa inesperada) llegara a lanzar. Ver hallazgo 1 del
+      // informe: antes, un `fetch` que lanzaba dejaba el campo deshabilitado
+      // para siempre.
+      if (montadoRef.current) setTopeGuardando(false);
     }
-    setTope(resultado.tope);
-    setTopeBorrador(String(resultado.tope));
   }
 
   const valorar = useCallback(
@@ -432,6 +463,13 @@ export function SesionRepaso() {
               : `${resumen.noGuardadas} respuestas no se guardaron`}
             , revisa tu conexión: {terminosPerdidos}. Esas tarjetas volverán a aparecer en el
             próximo repaso.
+          </p>
+        ) : null}
+
+        {tope === null && topeCargaFallo ? (
+          <p style={TEXTO_1} className="border-t border-borde pt-4 text-texto-suave">
+            No se ha podido cargar el tope de tarjetas nuevas. Actualiza la página para
+            intentarlo de nuevo.
           </p>
         ) : null}
 

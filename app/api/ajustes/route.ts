@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { getNewCardsPerDay, setNewCardsPerDay } from "@/db/repository/settings";
+import {
+  getNewCardsPerDay,
+  setNewCardsPerDay,
+  TOPE_MAXIMO_TARJETAS_NUEVAS as TOPE_MAXIMO,
+} from "@/db/repository/settings";
 import { getDb } from "@/db/client";
-
-/** Un tope por encima de esto ya no es una preferencia razonable, es un error
- * de digitación o un intento de dinamitar la sesión diaria: 200 tarjetas
- * nuevas equivalen a horas de repaso, muy por encima de lo que cualquier
- * estudiante sensato pediría en un día. */
-const TOPE_MAXIMO = 200;
 
 type Body = { newCardsPerDay?: number };
 
