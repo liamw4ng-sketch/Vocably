@@ -4,6 +4,10 @@ import { anadirDesdeDiccionario } from "@/db/repository/diccionario";
 import { isCefrLevel } from "@/lib/extraction-schema";
 import { getDb } from "@/db/client";
 
+function esString(valor: unknown): valor is string {
+  return typeof valor === "string";
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const rows = await listTerms(getDb(), {
@@ -34,11 +38,14 @@ export async function POST(request: Request) {
 
   const { term, pos, gloss, example, translation, level } = body ?? {};
 
-  if (!term?.trim() || !pos?.trim() || !gloss?.trim()) {
+  if (!esString(term) || !term.trim() || !esString(pos) || !pos.trim() || !esString(gloss) || !gloss.trim()) {
     return NextResponse.json({ error: "Falta el término, su categoría o su significado." }, { status: 400 });
   }
-  if (!translation?.trim()) {
+  if (!esString(translation) || !translation.trim()) {
     return NextResponse.json({ error: "Falta la traducción." }, { status: 400 });
+  }
+  if (example !== undefined && example !== null && !esString(example)) {
+    return NextResponse.json({ error: "El ejemplo debe ser una cadena." }, { status: 400 });
   }
   // Sin nivel no se guarda: es la decisión del usuario, y un valor por defecto
   // llenaría la biblioteca de niveles que nadie ha elegido.

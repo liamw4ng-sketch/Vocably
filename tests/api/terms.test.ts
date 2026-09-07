@@ -272,4 +272,66 @@ describe("POST /api/terms", () => {
     expect((await res.json()).error).toContain("nivel");
     expect(await listTerms(testDb, {})).toHaveLength(0);
   });
+
+  it("term numérico devuelve 400, no revienta", async () => {
+    const res = await POST(
+      postRequest({
+        term: 123,
+        pos: "noun",
+        gloss: "A number.",
+        translation: "número",
+        level: "A1",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("término");
+    expect(await listTerms(testDb, {})).toHaveLength(0);
+  });
+
+  it("example numérico devuelve 400", async () => {
+    const res = await POST(
+      postRequest({
+        term: "bank",
+        pos: "noun",
+        gloss: "A financial institution.",
+        example: 42,
+        translation: "banco",
+        level: "A1",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("ejemplo");
+    expect(await listTerms(testDb, {})).toHaveLength(0);
+  });
+
+  it("example ausente sigue funcionando", async () => {
+    const res = await POST(
+      postRequest({
+        term: "bank",
+        pos: "noun",
+        gloss: "A financial institution.",
+        translation: "banco",
+        level: "A1",
+      }),
+    );
+    expect(res.status).toBe(201);
+    const [row] = await listTerms(testDb, {});
+    expect(row.term).toBe("bank");
+  });
+
+  it("example null explícito sigue funcionando", async () => {
+    const res = await POST(
+      postRequest({
+        term: "bank",
+        pos: "noun",
+        gloss: "A financial institution.",
+        example: null,
+        translation: "banco",
+        level: "A1",
+      }),
+    );
+    expect(res.status).toBe(201);
+    const [row] = await listTerms(testDb, {});
+    expect(row.term).toBe("bank");
+  });
 });
