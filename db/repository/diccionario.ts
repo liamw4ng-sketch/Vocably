@@ -1,8 +1,10 @@
-import { eq, inArray } from "drizzle-orm";
-import { dictionaryEntries, terms } from "@/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { dictionaryEntries, terms, sources, termOccurrences, cardStates } from "@/db/schema";
 import type { Database } from "@/db/types";
 import { filasDeLinea, type FilaDiccionario } from "@/lib/diccionario/entrada";
 import { variantesDelLema } from "@/lib/diccionario/lema";
+import { normalizeTerm } from "@/lib/normalize";
+import { tipoDeTermino } from "@/lib/diccionario/tipo";
 
 /** 500 filas por INSERT: por encima, el número de parámetros incomoda al driver. */
 const TAMANO_LOTE = 500;
@@ -106,4 +108,84 @@ export async function buscarEnBiblioteca(
     .from(terms)
     .where(inArray(terms.termNormalized, variantesDelLema(termino)))
     .orderBy(terms.id);
+}
+
+/** Título de la fuente a la que se cuelga todo lo buscado a mano en el diccionario. */
+export const FUENTE_DICCIONARIO = "Diccionario";
+
+/**
+ * Añade a la biblioteca una acepción encontrada en el diccionario de consulta.
+ * Todo lo buscado a mano cuelga de una única fuente "Diccionario", con 0
+ * páginas y coste 0, para que la biblioteca pueda distinguir lo que se buscó
+ * de lo que salió de un PDF.
+ *
+ * La clave de deduplicación es la pareja (término normalizado, pista): dos
+ * acepciones distintas del mismo término ("bank" = orilla, "bank" = banco)
+ * son dos fichas, no una que se pisa a la otra.
+ */
+export async function anadirDesdeDiccionario(
+  db: Database,
+  entrada: {
+    term: string;
+    pos: string;
+    gloss: string;
+    example: string | null;
+    translation: string;
+    level: string;
+  },
+): Promise<{ termId: number; created: boolean }> {
+  return db.transaction(async (tx) => {
+    const existentes = await tx
+      .select({ id: sources.id })
+      .from(sources)
+      .where(eq(sources.title, FUENTE_DICCIONARIO))
+      .limit(1);
+
+    const sourceId =
+      existentes[0]?.id ??
+      (
+        await tx
+          .insert(sources)
+          .values({
+            title: FUENTE_DICCIONARIO,
+            pageStart: 0,
+            pageEnd: 0,
+            level: entrada.level,
+          })
+          .returning({ id: sources.id })
+      )[0].id;
+
+    const clave = normalizeTerm(entrada.term);
+    const yaEsta = await tx
+      .select({ id: terms.id })
+      .from(terms)
+      .where(and(eq(terms.termNormalized, clave), eq(terms.senseHint, entrada.gloss)))
+      .limit(1);
+
+    if (yaEsta.length > 0) return { termId: yaEsta[0].id, created: false };
+
+    const [creado] = await tx
+      .insert(terms)
+      .values({
+        term: entrada.term.trim(),
+        termNormalized: clave,
+        type: tipoDeTermino(entrada.term, entrada.pos),
+        translation: entrada.translation,
+        level: entrada.level,
+        senseHint: entrada.gloss,
+      })
+      .returning({ id: terms.id });
+
+    await tx.insert(cardStates).values({ termId: creado.id });
+    await tx.insert(termOccurrences).values({
+      termId: creado.id,
+      sourceId,
+      // El diccionario no da la frase en que se encontró la palabra: no hay
+      // libro detrás. El significado en inglés es el contexto más honesto.
+      context: entrada.gloss,
+      example: entrada.example ?? "",
+    });
+
+    return { termId: creado.id, created: true };
+  });
 }
