@@ -16,27 +16,30 @@ export async function cargarDiccionario(
   opciones: { tamanoLote?: number } = {},
 ): Promise<{ entradas: number; filas: number }> {
   const tamanoLote = opciones.tamanoLote ?? TAMANO_LOTE;
-  await db.delete(dictionaryEntries);
 
-  let entradas = 0;
-  let filas = 0;
-  let lote: FilaDiccionario[] = [];
+  return db.transaction(async (tx) => {
+    await tx.delete(dictionaryEntries);
 
-  const vaciarLote = async () => {
-    if (lote.length === 0) return;
-    await db.insert(dictionaryEntries).values(lote);
-    filas += lote.length;
-    lote = [];
-  };
+    let entradas = 0;
+    let filas = 0;
+    let lote: FilaDiccionario[] = [];
 
-  for await (const linea of lineas) {
-    const nuevas = filasDeLinea(linea);
-    if (nuevas.length === 0) continue;
-    entradas += 1;
-    lote.push(...nuevas);
-    if (lote.length >= tamanoLote) await vaciarLote();
-  }
-  await vaciarLote();
+    const vaciarLote = async () => {
+      if (lote.length === 0) return;
+      await tx.insert(dictionaryEntries).values(lote);
+      filas += lote.length;
+      lote = [];
+    };
 
-  return { entradas, filas };
+    for await (const linea of lineas) {
+      const nuevas = filasDeLinea(linea);
+      if (nuevas.length === 0) continue;
+      entradas += 1;
+      lote.push(...nuevas);
+      if (lote.length >= tamanoLote) await vaciarLote();
+    }
+    await vaciarLote();
+
+    return { entradas, filas };
+  });
 }

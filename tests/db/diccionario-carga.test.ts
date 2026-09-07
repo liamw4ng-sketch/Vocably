@@ -53,4 +53,30 @@ describe("cargarDiccionario", () => {
     expect(await db.select().from(dictionaryEntries)).toHaveLength(6);
     await close();
   });
+
+  it("si falla a mitad de carga, la tabla se queda como estaba (transacción atómica)", async () => {
+    const { db, close } = await createTestDb();
+
+    // Cargar primero un diccionario conocido
+    await cargarDiccionario(db, lineasDe(bank));
+    const conteoAntes = (await db.select().from(dictionaryEntries)).length;
+    expect(conteoAntes).toBe(2);
+
+    // Iterable que falla a mitad
+    async function* lineasQueFallan() {
+      yield bank; // una línea buena
+      throw new Error("Simulated network timeout after partial insert");
+    }
+
+    // Intentar cargar: debe fallar
+    await expect(cargarDiccionario(db, lineasQueFallan())).rejects.toThrow(
+      "Simulated network timeout after partial insert"
+    );
+
+    // Verificar que la tabla sigue con el contenido anterior, no vacía
+    const conteoDesp = (await db.select().from(dictionaryEntries)).length;
+    expect(conteoDesp).toBe(conteoAntes);
+
+    await close();
+  });
 });
