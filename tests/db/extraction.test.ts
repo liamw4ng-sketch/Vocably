@@ -204,4 +204,46 @@ describe("saveExtraction", () => {
     await expect(db.insert(terms).values(fila)).rejects.toThrow();
     await close();
   });
+
+  it("una extracción de PDF no fusiona con una acepción ya guardada desde el diccionario", async () => {
+    const { db, close } = await createTestDb();
+
+    // Fila preexistente, como la que dejaría el diccionario al guardar una
+    // acepción concreta: tiene pista y una traducción que no es del PDF.
+    await db.insert(terms).values({
+      term: "bank",
+      termNormalized: "bank",
+      type: "word",
+      translation: "orilla",
+      level: "B1",
+      senseHint: "An edge of a river.",
+    });
+
+    const result = await saveExtraction(db, {
+      ...base,
+      items: [
+        {
+          term: "bank",
+          type: "word",
+          translation: "banco",
+          context: "I went to the bank to withdraw money.",
+          example: "She works at a bank.",
+        },
+      ],
+    });
+
+    // Sin pista propia, el ítem del PDF no puede fusionarse con la fila que
+    // sí tiene pista: debe crear su propia fila.
+    expect(result.created).toBe(1);
+    expect(result.merged).toBe(0);
+
+    const guardados = await db.select().from(terms);
+    expect(guardados).toHaveLength(2);
+
+    // Y la fila con pista queda intacta: ni su traducción ni su pista se tocan.
+    const conPista = guardados.find((t) => t.senseHint !== "");
+    expect(conPista?.translation).toBe("orilla");
+    expect(conPista?.senseHint).toBe("An edge of a river.");
+    await close();
+  });
 });
