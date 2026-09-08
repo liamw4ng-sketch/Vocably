@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
 import { anadirDesdeDiccionario } from "@/db/repository/diccionario";
-import { setNewCardsPerDay, setSessionSize } from "@/db/repository/settings";
+import { setNewCardsPerDay, setSessionSize, setSessionMode } from "@/db/repository/settings";
 import {
   getDueQueue,
   formatearPlazo,
   applyAnswer,
   type OpcionesCola,
 } from "@/db/repository/review";
-import { cardStates } from "@/db/schema";
+import { cardStates, terms } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 let db: TestDb;
@@ -55,6 +55,24 @@ async function enAprendizaje(termIds: number[]) {
       .set({ state: 1, reps: 1, due: new Date("2026-09-10T08:50:00Z") })
       .where(eq(cardStates.termId, termId));
   }
+}
+
+/** Deja esos términos como aprendidas que aún NO vencen. */
+async function aprendidaFutura(termId: number, due: Date) {
+  await db.update(cardStates).set({ state: 2, reps: 3, due }).where(eq(cardStates.termId, termId));
+}
+
+/**
+ * `saveExtraction` guarda una extracción completa (fuente + términos) pero no
+ * devuelve los `termId` que crea. Las pruebas de esta sección necesitan
+ * manipular tarjetas concretas por id, así que se consultan aparte por su
+ * texto justo después de guardar, en el mismo orden que `items`.
+ */
+async function guardarConIds(items: ReturnType<typeof termino>[]) {
+  await saveExtraction(db, { ...base, items });
+  const filas = await db.select({ id: terms.id, term: terms.term }).from(terms);
+  const porTermino = new Map(filas.map((f) => [f.term, f.id]));
+  return { termIds: items.map((it) => porTermino.get(it.term)!) };
 }
 
 /** Pseudoaleatorio determinista: la misma semilla da siempre el mismo sorteo. */
@@ -226,34 +244,6 @@ describe("getDueQueue", () => {
     expect(carta.plazos[4]).toBe("8 días");
   });
 
-  it("adelantar reparte otro lote cuando el cupo del día ya está gastado", async () => {
-    // El estado que la interfaz produce de verdad: el botón "Adelantar
-    // palabras nuevas" solo se enseña cuando la cola llega vacía, y con el
-    // cupo diario la cola llega vacía porque el cupo ya está gastado, no
-    // porque no queden palabras. Probar `adelantar` sobre una cola que aún
-    // tenía cupo (como hacía la versión anterior de esta prueba) comprueba
-    // un estado en el que el botón nunca se pulsa.
-    await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
-    await setNewCardsPerDay(db, 2);
-
-    const primeras = await cartasDe({ now: AHORA });
-    expect(primeras).toHaveLength(2);
-    await responder(primeras);
-
-    // Cupo gastado: la pantalla vacía, que es donde vive el botón.
-    expect(await cartasDe({ now: AHORA })).toHaveLength(0);
-
-    // Adelantar concede OTRO LOTE del tamaño del tope sobre lo ya
-    // introducido hoy: 2, ni 0 (el cupo gastado) ni 4 (el doble de un tope
-    // que ya se gastó) ni 8 (todo lo que queda en la biblioteca).
-    const adelantada = await cartasDe({ now: AHORA, adelantar: true });
-    expect(adelantada).toHaveLength(2);
-    expect(adelantada.every((c) => c.esNueva)).toBe(true);
-    // Y son palabras distintas de las ya introducidas.
-    const yaVistas = primeras.map((c) => c.termId);
-    expect(adelantada.some((c) => yaVistas.includes(c.termId))).toBe(false);
-  });
-
   it("las tarjetas nuevas de hoy no se vuelven a repartir al recargar", async () => {
     // El fallo que esta prueba existe para impedir: responder el lote del día
     // saca esas tarjetas del estado "nueva", así que un tope aplicado sobre
@@ -375,11 +365,15 @@ describe("getDueQueue", () => {
     // Una palabra en aprendizaje o reaprendizaje es una que acabas de fallar
     // y que el programa quiere volver a preguntarte en minutos. Dejarla fuera
     // por el límite es lo único que sí rompería la repetición espaciada.
+    //
+    // El tamaño de sesión es ahora un total (lo compone `componerSesion`), no
+    // un límite que solo tocaba los repasos: se pide cupo para las dos en
+    // curso más dos vencidas, para poder comprobar que las en curso van
+    // enteras y sin sortear aunque compitan por el mismo cupo.
     await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
     await madurar([1, 2, 3, 4, 5]);
     await enAprendizaje([6, 7]);
-    await setNewCardsPerDay(db, 0);
-    await setSessionSize(db, 2);
+    await setSessionSize(db, 4);
 
     for (const semilla of [1, 2, 3, 4, 5]) {
       const { cartas, repasosFuera } = await getDueQueue(db, {
@@ -410,17 +404,6 @@ describe("getDueQueue", () => {
     expect([...elegidas].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
-  it("el límite de repasos no toca el cupo de palabras nuevas", async () => {
-    await saveExtraction(db, { ...base, items: Array.from({ length: 20 }, (_, i) => termino(i)) });
-    await madurar([1, 2, 3, 4, 5, 6, 7, 8]);
-    await setNewCardsPerDay(db, 5);
-    await setSessionSize(db, 2);
-
-    const { cartas } = await getDueQueue(db, { now: AHORA, aleatorio: generador(1) });
-    expect(cartas.filter((c) => c.esNueva)).toHaveLength(5);
-    expect(cartas.filter((c) => !c.esNueva)).toHaveLength(2);
-  });
-
   it("la cola trae la pista de la acepción", async () => {
     const { termId } = await anadirDesdeDiccionario(db, {
       term: "bank",
@@ -444,6 +427,103 @@ describe("getDueQueue", () => {
 
     const { cartas } = await getDueQueue(db, { now: AHORA });
     expect(cartas[0].senseHint).toBe("");
+  });
+});
+
+describe("modos de sesión", () => {
+  it("no-aprendidas deja fuera los repasos vencidos", async () => {
+    const { termIds } = await guardarConIds([termino(1), termino(2)]);
+    await madurar([termIds[0]]);
+
+    const cartas = await cartasDe({ now: AHORA, modo: "no-aprendidas" });
+
+    expect(cartas.map((c) => c.termId)).toEqual([termIds[1]]);
+  });
+
+  it("aprendidas deja fuera las nuevas y las que están en curso", async () => {
+    const { termIds } = await guardarConIds([termino(1), termino(2), termino(3)]);
+    await madurar([termIds[0]]);
+    await enAprendizaje([termIds[1]]);
+
+    const cartas = await cartasDe({ now: AHORA, modo: "aprendidas" });
+
+    expect(cartas.map((c) => c.termId)).toEqual([termIds[0]]);
+  });
+});
+
+describe("adelantar aprendidas con un tamaño de sesión", () => {
+  /**
+   * La regresión que importa: antes de este cambio, una aprendida que aún no
+   * vencía se caía del bucle de `getDueQueue` sin entrar en ningún grupo, así
+   * que no había forma de adelantarla.
+   */
+  it("una aprendida que aún no vence entra si el número lo pide", async () => {
+    const { termIds } = await guardarConIds([termino(1)]);
+    await aprendidaFutura(termIds[0], new Date("2026-09-20T09:00:00Z"));
+
+    const cartas = await cartasDe({ now: AHORA, modo: "aprendidas", cuantas: 5 });
+
+    expect(cartas.map((c) => c.termId)).toEqual([termIds[0]]);
+  });
+
+  it("y NO entra con el número a 0, que promete no adelantar nada", async () => {
+    const { termIds } = await guardarConIds([termino(1)]);
+    await aprendidaFutura(termIds[0], new Date("2026-09-20T09:00:00Z"));
+
+    const cartas = await cartasDe({ now: AHORA, modo: "aprendidas", cuantas: 0 });
+
+    expect(cartas).toEqual([]);
+  });
+
+  it("se adelanta la más próxima primero", async () => {
+    const { termIds } = await guardarConIds([termino(1), termino(2)]);
+    await aprendidaFutura(termIds[0], new Date("2026-09-30T09:00:00Z"));
+    await aprendidaFutura(termIds[1], new Date("2026-09-12T09:00:00Z"));
+
+    const cartas = await cartasDe({ now: AHORA, modo: "aprendidas", cuantas: 1 });
+
+    expect(cartas.map((c) => c.termId)).toEqual([termIds[1]]);
+  });
+
+  it("el número manda sobre el tope diario de tarjetas nuevas", async () => {
+    const { termIds } = await guardarConIds([termino(1), termino(2), termino(3)]);
+    await setNewCardsPerDay(db, 1);
+
+    const cartas = await cartasDe({ now: AHORA, modo: "no-aprendidas", cuantas: 3 });
+
+    expect(cartas).toHaveLength(3);
+    expect(new Set(cartas.map((c) => c.termId))).toEqual(new Set(termIds));
+  });
+
+  it("con el número a 0 el tope diario sigue mandando", async () => {
+    await guardarConIds([termino(1), termino(2), termino(3)]);
+    await setNewCardsPerDay(db, 1);
+
+    const cartas = await cartasDe({ now: AHORA, modo: "no-aprendidas", cuantas: 0 });
+
+    expect(cartas).toHaveLength(1);
+  });
+});
+
+describe("el modo y el número salen de los ajustes si no se piden", () => {
+  it("usa el tamaño guardado cuando la llamada no trae número", async () => {
+    const { termIds } = await guardarConIds([termino(1), termino(2), termino(3)]);
+    await madurar(termIds);
+    await setSessionSize(db, 2);
+
+    const cartas = await cartasDe({ now: AHORA });
+
+    expect(cartas).toHaveLength(2);
+  });
+
+  it("usa el modo guardado cuando la llamada no trae modo", async () => {
+    const { termIds } = await guardarConIds([termino(1), termino(2)]);
+    await madurar([termIds[0]]);
+    await setSessionMode(db, "aprendidas");
+
+    const cartas = await cartasDe({ now: AHORA });
+
+    expect(cartas.map((c) => c.termId)).toEqual([termIds[0]]);
   });
 });
 

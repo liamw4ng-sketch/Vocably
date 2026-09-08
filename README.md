@@ -57,17 +57,23 @@ resumen que aparece al terminar la sesión — no hay una pantalla de ajustes
 aparte.
 
 - **`newCardsPerDay`** (20 por defecto): cuántas palabras nuevas entran al
-  día. Es diario: se cuentan las introducciones ya registradas hoy
-  (`review_logs` con `state = 0` desde la medianoche de Madrid) y se resta.
-- **`sessionSize`** (0 por defecto): cuántas palabras entran en cada sesión.
-  **0 significa "las que toquen hoy"**, así que por defecto la app no recorta
-  nada por su cuenta.
+  día cuando el tamaño de sesión es `0`. Es diario: se cuentan las
+  introducciones ya registradas hoy (`review_logs` con `state = 0` desde la
+  medianoche de Madrid) y se resta. Con un tamaño de sesión explícito este
+  tope queda sin efecto (ver `sessionSize`).
+- **`sessionSize`** (0 por defecto): cuántas palabras entran **en total** en
+  cada sesión, contando juntas en curso, aprendidas y nuevas. **0 significa
+  "las que toquen hoy"**, así que por defecto la app no recorta nada por su
+  cuenta y manda el tope diario de nuevas de arriba. Con cualquier otro
+  número manda ese número, incluso por encima del tope diario: pedir 30 da
+  30, aunque `newCardsPerDay` solo dejara entrar 5 hoy.
 - **`sessionMode`** (`mezcla` por defecto): de cuál colección salen las
   palabras. Los valores válidos son `no-aprendidas` (en curso y nuevas),
   `aprendidas` (ya aprendidas que venzan) o `mezcla` (en curso, aprendidas
   vencidas y nuevas). Con un tamaño de sesión mayor que 0, `aprendidas` y
-  `mezcla` rellenan lo que falte adelantando aprendidas que aún no vencían;
-  con 0 no se adelanta nada.
+  `mezcla` rellenan además lo que falte adelantando aprendidas que aún no
+  vencían, la más próxima primero (nunca al azar, para no repetir lo mismo si
+  se adelanta dos días seguidos); con 0 no se adelanta nada.
 
 Cuando vencen más palabras aprendidas de las que caben en la sesión, se
 **sortean**: cuáles entran se decide al azar, no por antigüedad ni por id, de
@@ -77,9 +83,11 @@ toca.
 
 Dos garantías del recorte:
 
-- **Las que están en curso nunca se recortan.** Son las que acabas de fallar y
-  el algoritmo quiere volver a preguntar en minutos; dejarlas fuera sería lo
-  único que rompería de verdad la repetición espaciada.
+- **Las que están en curso nunca se sortean, y van siempre las primeras.** Son
+  las que acabas de fallar y el algoritmo quiere volver a preguntar en
+  minutos. Con el tamaño de sesión a `0` (el valor de fábrica) entran todas
+  seguro; con un tamaño explícito cuentan, como cualquier otra tarjeta, contra
+  ese total.
 - **Lo que queda fuera no se pierde:** sigue vencido y entra en la sesión
   siguiente. Al terminar, la pantalla dice cuántos repasos quedaron fuera del
   límite y ofrece seguir. Conviene mirarlo: un límite por debajo del ritmo

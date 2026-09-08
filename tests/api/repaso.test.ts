@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
-import { setNewCardsPerDay } from "@/db/repository/settings";
+import { setNewCardsPerDay, setSessionMode, setSessionSize } from "@/db/repository/settings";
 
 let db: TestDb;
 let closeDb: () => Promise<void>;
@@ -54,10 +54,17 @@ describe("GET /api/repaso/cola", () => {
     expect(body.cartas[0].term).toBe("come across");
   });
 
-  it("con adelantar=1 entrega otro lote cuando el cupo del día ya está gastado", async () => {
+  it("un tamaño de sesión guardado manda sobre el tope diario de nuevas", async () => {
+    // El equivalente de "adelantar nuevas" ya no es un parámetro aparte: es
+    // pedir un tamaño de sesión explícito en modo "no-aprendidas", que manda
+    // incluso por encima del tope diario (`getDueQueue`/`componerSesion`).
+    // Esta ruta todavía no acepta `?modo=` ni `?cuantas=` en la URL —eso es
+    // la Task 4—, así que se prueba a través de los ajustes guardados, que es
+    // lo único que hoy puede fijar el modo y el tamaño de sesión.
+    //
     // El beforeEach ya guardó un término ("come across"); se añaden más para
-    // tener 10 nuevas disponibles en total con las que distinguir un lote
-    // fijo de "todo lo que queda".
+    // tener 10 nuevas disponibles en total con las que distinguir un tamaño
+    // de sesión fijo de "todo lo que queda".
     await saveExtraction(db, {
       title: "Libro",
       pageStart: 1,
@@ -75,23 +82,15 @@ describe("GET /api/repaso/cola", () => {
       })),
     });
     await setNewCardsPerDay(db, 2);
+    await setSessionMode(db, "no-aprendidas");
+    await setSessionSize(db, 5);
 
-    const normal = await GET(new Request("http://localhost/api/repaso/cola"));
-    const cartas = (await normal.json()).cartas as { termId: number }[];
-    expect(cartas).toHaveLength(2);
+    const res = await GET(new Request("http://localhost/api/repaso/cola"));
+    const cartas = (await res.json()).cartas as { termId: number; esNueva: boolean }[];
 
-    // Se responden las dos: el cupo del día queda gastado y la cola llega
-    // vacía, que es el único estado en el que la interfaz enseña el botón de
-    // adelantar. La ruta deriva `now` del servidor, así que las respuestas
-    // cuentan contra el día de hoy sin que el cliente mande ninguna fecha.
-    for (const carta of cartas) {
-      await POST(post({ answerId: `a${carta.termId}`, termId: carta.termId, rating: 3 }));
-    }
-    const vacia = await GET(new Request("http://localhost/api/repaso/cola"));
-    expect((await vacia.json()).cartas).toHaveLength(0);
-
-    const adelantada = await GET(new Request("http://localhost/api/repaso/cola?adelantar=1"));
-    expect((await adelantada.json()).cartas).toHaveLength(2);
+    // El tope diario (2) queda ignorado: el tamaño de sesión pedido (5) manda.
+    expect(cartas).toHaveLength(5);
+    expect(cartas.every((c) => c.esNueva)).toBe(true);
   });
 
   it("acepta filtros por tipo", async () => {

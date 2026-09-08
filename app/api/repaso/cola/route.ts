@@ -10,7 +10,6 @@ export async function GET(request: Request) {
     now: new Date(),
     source: url.searchParams.get("source") ?? undefined,
     type: url.searchParams.get("type") ?? undefined,
-    adelantar: url.searchParams.get("adelantar") === "1",
   });
   return NextResponse.json(cola);
 }

@@ -5,8 +5,9 @@ import type { Database } from "@/db/types";
 import { State, fsrs, type Grade } from "ts-fsrs";
 import { toFsrsCard, fromFsrsCard } from "@/lib/fsrs";
 import { inicioDelDia } from "@/lib/dia";
-import { barajar } from "@/lib/barajar";
 import { formatearPlazo } from "@/lib/plazo";
+import { componerSesion, type Grupos } from "@/lib/repaso/coleccion";
+import type { Modo } from "@/lib/ajustes";
 
 const programador = fsrs();
 
@@ -38,8 +39,10 @@ export type OpcionesCola = {
   now: Date;
   source?: string;
   type?: string;
-  /** Acción explícita del usuario: introducir tarjetas nuevas por encima del tope del día. */
-  adelantar?: boolean;
+  /** Si no se pasa, manda el modo guardado en los ajustes. */
+  modo?: Modo;
+  /** Si no se pasa, manda el tamaño guardado. 0 = las que toquen hoy. */
+  cuantas?: number;
   /** Fuente de azar del sorteo de repasos. Se inyecta solo en las pruebas. */
   aleatorio?: () => number;
 };
@@ -77,17 +80,19 @@ async function introducidasHoy(db: Database, ahora: Date): Promise<number> {
 }
 
 /**
- * La cola del día, en tres grupos:
+ * La cola del día, recogida en cuatro grupos:
  *
  *  - **En curso** (aprendizaje o reaprendizaje): palabras falladas hace
- *    minutos. Van siempre enteras y nunca entran en el sorteo.
- *  - **Aprendidas** vencidas: si hay más de las que caben en la sesión, se
- *    sortean. Las que quedan fuera siguen vencidas para la próxima.
- *  - **Nuevas**: hasta el cupo que quede del tope diario.
+ *    minutos.
+ *  - **Aprendidas vencidas**: ya tocan hoy.
+ *  - **Nuevas**: nunca respondidas.
+ *  - **Aprendidas futuras**: ya aprendidas pero que aún no vencen. Antes de
+ *    este cambio se tiraban sin entrar en ningún grupo; ahora se recogen
+ *    aparte, ordenadas por fecha, porque son las que se pueden adelantar.
  *
- * El sorteo solo actúa cuando hay que elegir. Si caben todas, el orden no se
- * toca: introducir azar donde no hay decisión que tomar solo haría las
- * sesiones irreproducibles sin ganar nada.
+ * Qué entra finalmente en la sesión, en qué orden y con qué recorte no se
+ * decide aquí: eso vive en `componerSesion` (`lib/repaso/coleccion.ts`), que
+ * recibe los cuatro grupos y el modo y tamaño de sesión pedidos.
  *
  * Un término puede tener varias apariciones (se encontró en más de una
  * fuente), así que la consulta agrupa en JavaScript por `termId` y se queda
@@ -133,7 +138,8 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
   const vistos = new Set<number>();
   const nuevas: CartaCola[] = [];
   const enCurso: CartaCola[] = [];
-  const aprendidas: CartaCola[] = [];
+  const aprendidasVencidas: CartaCola[] = [];
+  const futurasConFecha: { carta: CartaCola; due: Date }[] = [];
 
   for (const f of filas) {
     if (vistos.has(f.termId)) continue;
@@ -158,39 +164,36 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
       },
     };
     if (carta.esNueva) nuevas.push(carta);
-    else if (f.due <= opts.now) {
-      if (f.state === State.Review) aprendidas.push(carta);
-      else enCurso.push(carta);
-    }
+    else if (f.state === State.Review) {
+      // Las que aún no vencen ya no se tiran: son las que se pueden adelantar.
+      if (f.due <= opts.now) aprendidasVencidas.push(carta);
+      else futurasConFecha.push({ carta, due: f.due });
+    } else if (f.due <= opts.now) enCurso.push(carta);
   }
 
   // El tope es DIARIO: lo que queda de cupo es el tope menos lo que ya se ha
-  // introducido hoy, no el tope entero en cada petición.
-  //
-  // El tope es además un ritmo por defecto, no un muro: el usuario puede
-  // pedir adelantar material nuevo, pero la app nunca se lo salta sola.
-  // Adelantar concede OTRO LOTE del tamaño del tope sobre lo ya introducido
-  // hoy (cupo = tope, se hubiera gastado o no), no el doble de un cupo que ya
-  // está gastado —que no daría nada, que es el estado en el que la interfaz
-  // enseña el botón— ni todo lo que quede en la biblioteca: el spec de diseño
-  // dice "otro lote", y un tope diario que un botón se salta sin límite deja
-  // de ser un tope.
-  const { newCardsPerDay: tope, sessionSize: limiteRepasos } = await getAjustes(db);
-  const limiteNuevas = opts.adelantar
-    ? tope
-    : Math.max(0, tope - (await introducidasHoy(db, opts.now)));
+  // introducido hoy, no el tope entero en cada petición. Solo actúa cuando el
+  // usuario no ha pedido un tamaño de sesión; ver `componerSesion`.
+  const { newCardsPerDay: tope, sessionSize, sessionMode } = await getAjustes(db);
+  const limiteNuevas = Math.max(0, tope - (await introducidasHoy(db, opts.now)));
 
-  // 0 significa "todos los que venzan": la app no recorta el repaso por su
-  // cuenta, solo si el usuario ha pedido un tamaño de sesión.
-  const hayQueElegir = limiteRepasos > 0 && aprendidas.length > limiteRepasos;
-  const repasos = hayQueElegir
-    ? barajar(aprendidas, opts.aleatorio).slice(0, limiteRepasos)
-    : aprendidas;
-
-  return {
-    cartas: [...enCurso, ...repasos, ...nuevas.slice(0, limiteNuevas)],
-    repasosFuera: aprendidas.length - repasos.length,
+  // La más próxima primero: adelantar al azar traería lo mismo dos días
+  // seguidos y dejaría lo de pasado mañana sin tocar.
+  const grupos: Grupos<CartaCola> = {
+    enCurso,
+    nuevas,
+    aprendidasVencidas,
+    aprendidasFuturas: futurasConFecha
+      .sort((a, b) => a.due.getTime() - b.due.getTime())
+      .map((f) => f.carta),
   };
+
+  return componerSesion(grupos, {
+    modo: opts.modo ?? sessionMode,
+    cuantas: opts.cuantas ?? sessionSize,
+    limiteNuevas,
+    aleatorio: opts.aleatorio,
+  });
 }
 
 export type EntradaRespuesta = {
