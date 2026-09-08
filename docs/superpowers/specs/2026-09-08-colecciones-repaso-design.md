@@ -139,9 +139,12 @@ palabra fallada hace diez minutos y ya vencida podía quedarse fuera sin que nad
 la contara, y la pantalla felicitaba por haber terminado. `componerSesion` devuelve
 ahora `repasosFuera` (aprendidas vencidas) y `enCursoFuera` (en curso vencidas),
 medidos igual: lo que estaba en el grupo y no acabó en la sesión. Van separados
-porque de ellos depende **a qué colección lleva el botón de seguir**, y ningún modo
-trae las dos: un solo total diría cuántas quedan pero no dónde buscarlas, y un botón
-que va a la equivocada devuelve una sesión vacía. La pantalla los suma para decidir
+porque de ellos depende **a qué colección lleva el botón de seguir**, y de los tres
+modos solo `mezcla` trae las dos: un solo total diría cuántas quedan pero no dónde
+buscarlas, y un botón que manda al modo equivocado devuelve una sesión vacía. Con
+las dos cuentas se puede quedar en el modo elegido cuando ese modo ya cubre lo que
+falta, y saltar a `mezcla` solo cuando quedan cosas de ambas. La pantalla los suma
+para decidir
 si enseñar el aviso, y los mira por separado para elegir el modo. Sigue valiendo el
 motivo de contarlos: un tamaño de sesión por debajo del ritmo diario acumula atrasos
 en silencio hasta que la cola es impagable.
