@@ -16,7 +16,20 @@
  * en `components/SesionRepaso.tsx` — una sola fuente para los dos. */
 export const TOPE_MAXIMO_TARJETAS_NUEVAS = 200;
 
-/** Tope máximo de repasos por sesión, con el mismo criterio: por encima de
- * esto ya no es una preferencia, es un error de digitación. 0 significa
- * "todos los que venzan", que es el valor por defecto. */
-export const MAXIMO_REPASOS_POR_SESION = 500;
+/** Tamaño máximo de una sesión, con el mismo criterio que el tope de nuevas:
+ * por encima de esto ya no es una preferencia, es un error de digitación.
+ * 0 significa "las que toquen hoy", que es el valor por defecto. */
+export const MAXIMO_TAMANO_SESION = 500;
+
+/**
+ * Los tres modos de la pantalla previa del repaso. Se definen aquí, y no junto
+ * al composer, porque este módulo es el único que pueden importar a la vez el
+ * servidor y el navegador sin arrastrar la base de datos detrás.
+ */
+export const MODOS = ["no-aprendidas", "aprendidas", "mezcla"] as const;
+export type Modo = (typeof MODOS)[number];
+export const MODO_POR_DEFECTO: Modo = "mezcla";
+
+export function esModo(valor: unknown): valor is Modo {
+  return typeof valor === "string" && (MODOS as readonly string[]).includes(valor);
+}
