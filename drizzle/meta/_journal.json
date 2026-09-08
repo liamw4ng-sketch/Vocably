@@ -36,6 +36,13 @@
       "when": 1788789511318,
       "tag": "0004_youthful_zarda",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788881255487,
+      "tag": "0005_organic_scorpion",
+      "breakpoints": true
     }
   ]
 }

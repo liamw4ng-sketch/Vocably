@@ -1,27 +1,34 @@
 import { eq } from "drizzle-orm";
 import { settings } from "@/db/schema";
 import type { Database } from "@/db/types";
+import { esModo, MODO_POR_DEFECTO, type Modo } from "@/lib/ajustes";
 
 const FILA = 1;
 export const TOPE_POR_DEFECTO = 20;
-/** 0 significa "todos los repasos que venzan": la app no recorta por su cuenta. */
-export const REPASOS_POR_SESION_POR_DEFECTO = 0;
+/** 0 significa "las que toquen hoy": la app no recorta por su cuenta. */
+export const TAMANO_SESION_POR_DEFECTO = 0;
 
 export type Ajustes = {
   newCardsPerDay: number;
-  reviewsPerSession: number;
+  sessionSize: number;
+  sessionMode: Modo;
 };
 
 /**
- * Los dos ajustes de una vez. `getDueQueue` los necesita juntos y en la misma
- * petición, así que leerlos por separado serían dos viajes a la base para una
+ * Los tres ajustes de una vez. `getDueQueue` los necesita juntos y en la misma
+ * petición, así que leerlos por separado serían tres viajes a la base para una
  * tabla de una sola fila.
  */
 export async function getAjustes(db: Database): Promise<Ajustes> {
   const filas = await db.select().from(settings).where(eq(settings.id, FILA)).limit(1);
+  const guardado = filas[0]?.sessionMode;
   return {
     newCardsPerDay: filas[0]?.newCardsPerDay ?? TOPE_POR_DEFECTO,
-    reviewsPerSession: filas[0]?.reviewsPerSession ?? REPASOS_POR_SESION_POR_DEFECTO,
+    sessionSize: filas[0]?.sessionSize ?? TAMANO_SESION_POR_DEFECTO,
+    // La columna es `text`: nada en la base impide que llegue una cadena que
+    // ya no es un modo válido. Volver al de por defecto es mejor que dejar
+    // pasar un valor con el que `componerSesion` no sabría qué hacer.
+    sessionMode: esModo(guardado) ? guardado : MODO_POR_DEFECTO,
   };
 }
 
@@ -29,13 +36,9 @@ export async function getNewCardsPerDay(db: Database): Promise<number> {
   return (await getAjustes(db)).newCardsPerDay;
 }
 
-export async function getReviewsPerSession(db: Database): Promise<number> {
-  return (await getAjustes(db)).reviewsPerSession;
-}
-
 /**
  * Cada `set` escribe SOLO su columna en el `onConflictDoUpdate`. Si escribiera
- * la fila entera, guardar un ajuste devolvería el otro a su valor por defecto.
+ * la fila entera, guardar un ajuste devolvería los otros a su valor por defecto.
  */
 export async function setNewCardsPerDay(db: Database, valor: number): Promise<void> {
   if (!Number.isInteger(valor) || valor < 0) {
@@ -47,12 +50,22 @@ export async function setNewCardsPerDay(db: Database, valor: number): Promise<vo
     .onConflictDoUpdate({ target: settings.id, set: { newCardsPerDay: valor } });
 }
 
-export async function setReviewsPerSession(db: Database, valor: number): Promise<void> {
+export async function setSessionSize(db: Database, valor: number): Promise<void> {
   if (!Number.isInteger(valor) || valor < 0) {
-    throw new Error("Los repasos por sesión deben ser un entero no negativo.");
+    throw new Error("El tamaño de la sesión debe ser un entero no negativo.");
   }
   await db
     .insert(settings)
-    .values({ id: FILA, reviewsPerSession: valor })
-    .onConflictDoUpdate({ target: settings.id, set: { reviewsPerSession: valor } });
+    .values({ id: FILA, sessionSize: valor })
+    .onConflictDoUpdate({ target: settings.id, set: { sessionSize: valor } });
+}
+
+export async function setSessionMode(db: Database, modo: Modo): Promise<void> {
+  if (!esModo(modo)) {
+    throw new Error("El modo de sesión no es uno de los válidos.");
+  }
+  await db
+    .insert(settings)
+    .values({ id: FILA, sessionMode: modo })
+    .onConflictDoUpdate({ target: settings.id, set: { sessionMode: modo } });
 }

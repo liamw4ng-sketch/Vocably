@@ -103,8 +103,10 @@ export const reviewLogs = pgTable(
 export const settings = pgTable("settings", {
   id: integer("id").primaryKey().default(1),
   newCardsPerDay: integer("new_cards_per_day").notNull().default(20),
-  /** Cuántos repasos de palabras ya aprendidas entran en cada sesión. 0 = todos los que venzan. */
-  reviewsPerSession: integer("reviews_per_session").notNull().default(0),
+  /** Cuántas tarjetas entran en una sesión. 0 = las que toquen hoy. */
+  sessionSize: integer("session_size").notNull().default(0),
+  /** Modo por defecto de la pantalla previa: no-aprendidas | aprendidas | mezcla. */
+  sessionMode: text("session_mode").notNull().default("mezcla"),
 });
 
 /**

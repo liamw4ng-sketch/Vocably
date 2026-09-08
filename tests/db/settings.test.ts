@@ -3,8 +3,8 @@ import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import {
   getNewCardsPerDay,
   setNewCardsPerDay,
-  getReviewsPerSession,
-  setReviewsPerSession,
+  setSessionSize,
+  setSessionMode,
   getAjustes,
 } from "@/db/repository/settings";
 
@@ -41,26 +41,44 @@ describe("ajustes", () => {
     await expect(setNewCardsPerDay(db, 2.5)).rejects.toThrow();
   });
 
-  it("sin fila guardada los repasos por sesión son 0, es decir, sin límite", async () => {
-    expect(await getReviewsPerSession(db)).toBe(0);
+  it("el tamaño de sesión por defecto es 0: la app no recorta por su cuenta", async () => {
+    expect((await getAjustes(db)).sessionSize).toBe(0);
   });
 
-  it("guarda y recupera los repasos por sesión", async () => {
-    await setReviewsPerSession(db, 15);
-    expect(await getReviewsPerSession(db)).toBe(15);
+  it("el modo por defecto es mezcla", async () => {
+    expect((await getAjustes(db)).sessionMode).toBe("mezcla");
   });
 
-  it("los dos ajustes viven en la misma fila y no se pisan", async () => {
+  it("guarda el tamaño de sesión", async () => {
+    await setSessionSize(db, 15);
+    expect((await getAjustes(db)).sessionSize).toBe(15);
+  });
+
+  it("guarda el modo", async () => {
+    await setSessionMode(db, "aprendidas");
+    expect((await getAjustes(db)).sessionMode).toBe("aprendidas");
+  });
+
+  it("guardar un ajuste no pisa el otro", async () => {
     await setNewCardsPerDay(db, 7);
-    await setReviewsPerSession(db, 15);
-    expect(await getAjustes(db)).toEqual({ newCardsPerDay: 7, reviewsPerSession: 15 });
+    await setSessionSize(db, 15);
+    await setSessionMode(db, "no-aprendidas");
 
-    await setNewCardsPerDay(db, 8);
-    expect(await getAjustes(db)).toEqual({ newCardsPerDay: 8, reviewsPerSession: 15 });
+    const ajustes = await getAjustes(db);
+    expect(ajustes.newCardsPerDay).toBe(7);
+    expect(ajustes.sessionSize).toBe(15);
+    expect(ajustes.sessionMode).toBe("no-aprendidas");
   });
 
-  it("rechaza unos repasos por sesión negativos o no enteros", async () => {
-    await expect(setReviewsPerSession(db, -1)).rejects.toThrow();
-    await expect(setReviewsPerSession(db, 2.5)).rejects.toThrow();
+  it("rechaza un tamaño de sesión negativo", async () => {
+    await expect(setSessionSize(db, -1)).rejects.toThrow();
+  });
+
+  it("rechaza un tamaño de sesión no entero", async () => {
+    await expect(setSessionSize(db, 2.5)).rejects.toThrow();
+  });
+
+  it("rechaza un modo que no existe", async () => {
+    await expect(setSessionMode(db, "inventado" as never)).rejects.toThrow();
   });
 });

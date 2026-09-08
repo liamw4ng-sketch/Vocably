@@ -175,7 +175,7 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
   // enseña el botón— ni todo lo que quede en la biblioteca: el spec de diseño
   // dice "otro lote", y un tope diario que un botón se salta sin límite deja
   // de ser un tope.
-  const { newCardsPerDay: tope, reviewsPerSession: limiteRepasos } = await getAjustes(db);
+  const { newCardsPerDay: tope, sessionSize: limiteRepasos } = await getAjustes(db);
   const limiteNuevas = opts.adelantar
     ? tope
     : Math.max(0, tope - (await introducidasHoy(db, opts.now)));

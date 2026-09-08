@@ -65,20 +65,20 @@ describe("guardarAjuste", () => {
     // número que no está en la base de datos.
     global.fetch = vi.fn(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ newCardsPerDay: 20, reviewsPerSession: 12 }), {
+        new Response(JSON.stringify({ newCardsPerDay: 20, sessionSize: 12 }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
       ),
     ) as unknown as typeof fetch;
 
-    expect(await guardarAjuste("reviewsPerSession", 12)).toEqual({ valor: 12 });
+    expect(await guardarAjuste("sessionSize", 12)).toEqual({ valor: 12 });
   });
 
   it("manda solo el campo que cambia", async () => {
     const espia = vi.fn(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ reviewsPerSession: 30 }), {
+        new Response(JSON.stringify({ sessionSize: 30 }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -86,8 +86,8 @@ describe("guardarAjuste", () => {
     );
     global.fetch = espia as unknown as typeof fetch;
 
-    await guardarAjuste("reviewsPerSession", 30);
+    await guardarAjuste("sessionSize", 30);
     const [, opciones] = espia.mock.calls[0] as unknown as [string, RequestInit];
-    expect(JSON.parse(String(opciones.body))).toEqual({ reviewsPerSession: 30 });
+    expect(JSON.parse(String(opciones.body))).toEqual({ sessionSize: 30 });
   });
 });

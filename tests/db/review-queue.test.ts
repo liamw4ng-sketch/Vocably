@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
 import { anadirDesdeDiccionario } from "@/db/repository/diccionario";
-import { setNewCardsPerDay, setReviewsPerSession } from "@/db/repository/settings";
+import { setNewCardsPerDay, setSessionSize } from "@/db/repository/settings";
 import {
   getDueQueue,
   formatearPlazo,
@@ -346,7 +346,7 @@ describe("getDueQueue", () => {
     await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
     await madurar([1, 2, 3, 4, 5, 6, 7, 8]);
     await setNewCardsPerDay(db, 0);
-    await setReviewsPerSession(db, 3);
+    await setSessionSize(db, 3);
 
     const { cartas, repasosFuera } = await getDueQueue(db, { now: AHORA, aleatorio: generador(1) });
     expect(cartas).toHaveLength(3);
@@ -359,7 +359,7 @@ describe("getDueQueue", () => {
     await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
     await madurar([1, 2, 3, 4, 5, 6]);
     await setNewCardsPerDay(db, 0);
-    await setReviewsPerSession(db, 2);
+    await setSessionSize(db, 2);
 
     const primera = (await getDueQueue(db, { now: AHORA, aleatorio: generador(1) })).cartas;
     expect(primera).toHaveLength(2);
@@ -379,7 +379,7 @@ describe("getDueQueue", () => {
     await madurar([1, 2, 3, 4, 5]);
     await enAprendizaje([6, 7]);
     await setNewCardsPerDay(db, 0);
-    await setReviewsPerSession(db, 2);
+    await setSessionSize(db, 2);
 
     for (const semilla of [1, 2, 3, 4, 5]) {
       const { cartas, repasosFuera } = await getDueQueue(db, {
@@ -400,7 +400,7 @@ describe("getDueQueue", () => {
     await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
     await madurar([1, 2, 3, 4, 5, 6, 7, 8]);
     await setNewCardsPerDay(db, 0);
-    await setReviewsPerSession(db, 3);
+    await setSessionSize(db, 3);
 
     const elegidas = new Set<number>();
     for (let semilla = 1; semilla <= 40; semilla++) {
@@ -414,7 +414,7 @@ describe("getDueQueue", () => {
     await saveExtraction(db, { ...base, items: Array.from({ length: 20 }, (_, i) => termino(i)) });
     await madurar([1, 2, 3, 4, 5, 6, 7, 8]);
     await setNewCardsPerDay(db, 5);
-    await setReviewsPerSession(db, 2);
+    await setSessionSize(db, 2);
 
     const { cartas } = await getDueQueue(db, { now: AHORA, aleatorio: generador(1) });
     expect(cartas.filter((c) => c.esNueva)).toHaveLength(5);

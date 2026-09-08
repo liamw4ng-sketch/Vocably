@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CartaCola, Cola } from "@/db/repository/review";
-import { TOPE_MAXIMO_TARJETAS_NUEVAS, MAXIMO_REPASOS_POR_SESION } from "@/lib/ajustes";
+import { TOPE_MAXIMO_TARJETAS_NUEVAS, MAXIMO_TAMANO_SESION } from "@/lib/ajustes";
 import { crearSesion, type EnvioRespuesta, type Sesion, type Valoracion } from "@/lib/review-session";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
@@ -61,7 +61,7 @@ async function enviarRespuesta(envio: EnvioRespuesta): Promise<unknown> {
 }
 
 /** Los dos ajustes editables desde esta pantalla. */
-export type CampoAjuste = "newCardsPerDay" | "reviewsPerSession";
+export type CampoAjuste = "newCardsPerDay" | "sessionSize";
 type Ajustes = Record<CampoAjuste, number>;
 
 async function pedirAjustes(): Promise<Ajustes> {
@@ -279,7 +279,7 @@ export function SesionRepaso() {
   // significa "aún no se ha pedido al servidor, o la petición falló" — cuál de
   // las dos es `ajustesCargaFallo`, más abajo.
   const topeNuevas = useAjusteNumerico("newCardsPerDay", TOPE_MAXIMO_TARJETAS_NUEVAS, montadoRef);
-  const repasosSesion = useAjusteNumerico("reviewsPerSession", MAXIMO_REPASOS_POR_SESION, montadoRef);
+  const repasosSesion = useAjusteNumerico("sessionSize", MAXIMO_TAMANO_SESION, montadoRef);
   const [ajustesCargaFallo, setAjustesCargaFallo] = useState(false);
   // Si el GET fallara, los valores seguirían siendo `null` para siempre y nada
   // distinguiría "aún no pedido" de "pedido y fallido" — el efecto de abajo
@@ -344,7 +344,7 @@ export function SesionRepaso() {
       .then((ajustes) => {
         if (montadoRef.current) {
           topeNuevas.fijar(ajustes.newCardsPerDay);
-          repasosSesion.fijar(ajustes.reviewsPerSession);
+          repasosSesion.fijar(ajustes.sessionSize);
         }
       })
       .catch(() => {
@@ -482,7 +482,7 @@ export function SesionRepaso() {
           type="number"
           inputMode="numeric"
           min={0}
-          max={MAXIMO_REPASOS_POR_SESION}
+          max={MAXIMO_TAMANO_SESION}
           value={repasosSesion.borrador}
           disabled={repasosSesion.guardando}
           onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
