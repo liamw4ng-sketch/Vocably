@@ -7,7 +7,11 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const modo = url.searchParams.get("modo");
   const cuantas = url.searchParams.get("cuantas");
-  const numero = cuantas === null ? undefined : Number(cuantas);
+  // `URLSearchParams.get` devuelve "" —no null— con `?cuantas=` sin valor, y
+  // `Number("")` es 0. Tratarlo como el 0 explícito activaría el tope diario
+  // en vez del tamaño de sesión guardado, así que un valor vacío se trata
+  // igual que uno ausente.
+  const numero = cuantas === null || cuantas === "" ? undefined : Number(cuantas);
 
   // Un parámetro ilegible no se ignora en silencio: sin esto, un `cuantas=hola`
   // daría NaN, `componerSesion` no recortaría nada y el usuario recibiría una

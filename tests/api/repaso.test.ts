@@ -125,9 +125,9 @@ describe("GET /api/repaso/cola", () => {
     // El equivalente de "adelantar nuevas" ya no es un parámetro aparte: es
     // pedir un tamaño de sesión explícito en modo "no-aprendidas", que manda
     // incluso por encima del tope diario (`getDueQueue`/`componerSesion`).
-    // Esta ruta todavía no acepta `?modo=` ni `?cuantas=` en la URL —eso es
-    // la Task 4—, así que se prueba a través de los ajustes guardados, que es
-    // lo único que hoy puede fijar el modo y el tamaño de sesión.
+    // Esto se prueba aquí a través de los ajustes guardados —sin `?modo=` ni
+    // `?cuantas=` en la URL— para cubrir ese camino por separado del de los
+    // parámetros de la URL, que tiene sus propias pruebas más abajo.
     //
     // El beforeEach ya guardó un término ("come across"); se añaden más para
     // tener 10 nuevas disponibles en total con las que distinguir un tamaño
@@ -163,6 +163,100 @@ describe("GET /api/repaso/cola", () => {
   it("acepta filtros por tipo", async () => {
     const res = await GET(new Request("http://localhost/api/repaso/cola?type=word"));
     expect((await res.json()).cartas).toHaveLength(0);
+  });
+
+  it.each(["hola", "-1", "1.5"])(
+    "rechaza `cuantas=%s` con 400 y el mensaje en español",
+    async (valor) => {
+      const res = await GET(new Request(`http://localhost/api/repaso/cola?cuantas=${valor}`));
+      const body = await res.json();
+      expect(res.status).toBe(400);
+      expect(body.error).toBe("El número de tarjetas debe ser un entero no negativo.");
+    },
+  );
+
+  it("un `cuantas` vacío en la URL no se trata como 0: cae en el tamaño de sesión guardado", async () => {
+    // `URLSearchParams.get` devuelve "" —no null— cuando la URL trae
+    // `?cuantas=` sin valor, y `Number("")` es 0. Si la ruta no distingue "" de
+    // ausente, un input numérico que el cliente vació recibiría en silencio la
+    // cola recortada al tope diario (2 aquí) en vez del tamaño de sesión
+    // guardado (5), sin ningún error visible.
+    await saveExtraction(db, {
+      title: "Libro",
+      pageStart: 1,
+      pageEnd: 5,
+      level: "B2",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      items: Array.from({ length: 9 }, (_, i) => ({
+        term: `palabra${i}`,
+        type: "word" as const,
+        translation: `traducción${i}`,
+        context: `Frase con palabra${i}.`,
+        example: `Ejemplo con palabra${i}.`,
+      })),
+    });
+    await setNewCardsPerDay(db, 2);
+    await setSessionMode(db, "no-aprendidas");
+    await setSessionSize(db, 5);
+
+    const res = await GET(new Request("http://localhost/api/repaso/cola?cuantas="));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.cartas).toHaveLength(5);
+  });
+
+  it("`?cuantas=<n>` con un número válido: la sesión tiene exactamente n cartas", async () => {
+    await saveExtraction(db, {
+      title: "Libro",
+      pageStart: 1,
+      pageEnd: 5,
+      level: "B2",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      items: Array.from({ length: 9 }, (_, i) => ({
+        term: `palabra${i}`,
+        type: "word" as const,
+        translation: `traducción${i}`,
+        context: `Frase con palabra${i}.`,
+        example: `Ejemplo con palabra${i}.`,
+      })),
+    });
+
+    const res = await GET(new Request("http://localhost/api/repaso/cola?cuantas=3"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.cartas).toHaveLength(3);
+  });
+
+  it("`?modo=` con un modo válido manda sobre el guardado en ajustes", async () => {
+    // Se guarda "aprendidas" y no hay ninguna carta aprendida: si la ruta
+    // usara el modo guardado en vez del de la URL, la cola saldría vacía.
+    await setSessionMode(db, "aprendidas");
+
+    const res = await GET(new Request("http://localhost/api/repaso/cola?modo=no-aprendidas"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.cartas.length).toBeGreaterThan(0);
+    expect(body.cartas.every((c: { esNueva: boolean }) => c.esNueva)).toBe(true);
+  });
+
+  it("`?modo=inventado` no es un modo válido: cae en el guardado en ajustes", async () => {
+    // Con "aprendidas" guardado y ninguna carta aprendida, la cola vacía es la
+    // prueba de que el valor inventado no coló ni como error ni como si fuera
+    // "mezcla" (que sí traería la nueva del beforeEach) u otro modo distinto.
+    await setSessionMode(db, "aprendidas");
+
+    const res = await GET(new Request("http://localhost/api/repaso/cola?modo=inventado"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.cartas).toHaveLength(0);
   });
 });
 
