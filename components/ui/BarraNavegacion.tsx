@@ -18,19 +18,20 @@ export function BarraNavegacion() {
   return (
     <>
       {/* La barra es fija, así que no ocupa sitio en el flujo: sin este hueco
-          taparía el final de cada pantalla —el último término de la biblioteca,
-          el último botón del repaso— y no habría forma de llegar a ello. */}
+          taparía el principio de cada pantalla. */}
       <div
         aria-hidden
         className="h-16 shrink-0"
-        style={{ marginBottom: "env(safe-area-inset-bottom)" }}
+        style={{ marginTop: "env(safe-area-inset-top)" }}
       />
       <nav
         aria-label="Navegación principal"
-        className="fixed inset-x-0 bottom-0 z-10 border-t border-borde bg-superficie"
-        // El área segura del iPhone: sin esto la barra queda por debajo del
-        // indicador de inicio y sus toques no llegan a los enlaces.
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        className="fixed inset-x-0 top-0 z-10 border-b border-borde bg-superficie"
+        // Arriba y no abajo: en un iPhone la franja de abajo es del gesto de
+        // inicio del sistema, y una barra ahí se pelea con él por los mismos
+        // píxeles por mucho margen de seguridad que se le ponga.
+        // `safe-area-inset-top` deja sitio a la isla dinámica y a la hora.
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
         <ul className="mx-auto flex w-full max-w-xl">
           {DESTINOS.map((destino) => {

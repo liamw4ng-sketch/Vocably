@@ -122,8 +122,9 @@ body {
   }
 }
 
-/* Entrada al abrir la aplicación: el nombre aparece, se sostiene un momento y
-   la capa entera se va.
+/* Entrada al abrir la aplicación: primero el nombre, después la frase, y la
+   capa entera se va. Un segundo y medio largo en total, que es lo que aguanta
+   algo que se ve en cada apertura.
 
    Una vez por carga de página y nunca al navegar, sin nada de JavaScript: el
    elemento vive en el layout, que el App Router no vuelve a montar al cambiar
@@ -131,7 +132,7 @@ body {
    Ver components/ui/EntradaApp.tsx. */
 @keyframes entrada-app {
   0%,
-  55% {
+  88% {
     opacity: 1;
   }
   100% {
@@ -139,12 +140,29 @@ body {
   }
 }
 
-@keyframes entrada-app-nombre {
-  from {
+@keyframes entrada-nombre {
+  0% {
     opacity: 0;
     transform: translateY(6px);
   }
-  to {
+  25%,
+  70% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes entrada-frase {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  25%,
+  100% {
     opacity: 1;
     transform: none;
   }
@@ -154,19 +172,48 @@ body {
   /* Sin `forwards` a propósito: el reposo es el `opacity: 0` en línea del
      componente, así que la capa es invisible antes de la animación, después, y
      también si esta hoja no ha llegado todavía. */
-  animation: entrada-app 900ms ease-out;
+  animation: entrada-app 1600ms ease-out;
 }
 
-.animacion-entrada > p {
-  animation: entrada-app-nombre 400ms ease-out both;
+/* Los dos textos sí llevan `both`: el nombre se queda apagado tras irse y la
+   frase se sostiene hasta que la capa entera se desvanece. El retardo de la
+   frase empieza justo cuando el nombre termina de salir. */
+.entrada-nombre {
+  animation: entrada-nombre 650ms ease-out both;
 }
 
-/* Con movimiento reducido no hay entrada: sin animación, la capa se queda en
-   su reposo, que es el `opacity: 0` en línea. Es la única defensa, porque aquí
-   ya no hay JavaScript que decida nada. */
+.entrada-frase {
+  animation: entrada-frase 900ms ease-out 700ms both;
+}
+
+/* Cambio de sección: el contenido entra en vez de aparecer de golpe. Va en
+   `app/template.tsx` y no en el layout porque el App Router vuelve a montar la
+   plantilla en cada navegación —el layout no—, que es exactamente lo que hace
+   falta para que se repita. Corta a propósito: se ve muchas veces al día. */
+@keyframes entrada-seccion {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animacion-seccion {
+  animation: entrada-seccion 220ms ease-out;
+}
+
+/* Con movimiento reducido no hay ni entrada ni transición: sin animación, la
+   capa se queda en su reposo, que es el `opacity: 0` en línea, y las secciones
+   simplemente aparecen. Es la única defensa, porque aquí ya no hay JavaScript
+   que decida nada. */
 @media (prefers-reduced-motion: reduce) {
   .animacion-entrada,
-  .animacion-entrada > p {
+  .entrada-nombre,
+  .entrada-frase,
+  .animacion-seccion {
     animation: none;
   }
 }

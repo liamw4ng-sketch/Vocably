@@ -34,8 +34,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           ninguna pantalla puede volver a olvidarse de enlazar a otra. Decide
           ella misma si le toca salir, así que en `/login` no aparece. */}
       <body className="min-h-full flex flex-col">
-        {children}
         <BarraNavegacion />
+        {children}
         <EntradaApp />
       </body>
     </html>
