@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
 import { setNewCardsPerDay, setSessionMode, setSessionSize } from "@/db/repository/settings";
+import { cardStates } from "@/db/schema";
 
 let db: TestDb;
 let closeDb: () => Promise<void>;
@@ -52,6 +54,31 @@ describe("GET /api/repaso/cola", () => {
     expect(res.status).toBe(200);
     expect(body.cartas).toHaveLength(1);
     expect(body.cartas[0].term).toBe("come across");
+  });
+
+  it("ignora el `now` que llega por la URL: una aprendida que vence en 2030 no aparece aunque el cliente diga que ya es esa fecha", async () => {
+    // El beforeEach ya guardó "come across" (termId 1). Se deja como aprendida
+    // (state Review) pero vencida muy lejos en el futuro: con el modo
+    // "mezcla" por defecto y sin pedir un tamaño de sesión explícito,
+    // `componerSesion` nunca adelanta aprendidas futuras, así que hoy no debe
+    // salir en la cola.
+    await db
+      .update(cardStates)
+      .set({ state: 2, reps: 3, due: new Date("2030-01-01T00:00:00.000Z") })
+      .where(eq(cardStates.termId, 1));
+
+    // Si la ruta confiara en `?now=` para calcular la fecha, pedir la cola con
+    // un instante posterior a 2030 haría que esta tarjeta pareciera vencida
+    // (pasaría de "futuras" a "vencidas", que sí entra en la mezcla por
+    // defecto) y aparecería. La ruta debe ignorar por completo lo que mande
+    // el cliente y usar el reloj del propio servidor (hoy, muy anterior a
+    // 2030), así que la cola sigue vacía.
+    const res = await GET(
+      new Request("http://localhost/api/repaso/cola?now=2035-01-01T00:00:00.000Z"),
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.cartas).toHaveLength(0);
   });
 
   it("responder toda la cola gasta el tope diario, y la siguiente recarga llega vacía", async () => {
