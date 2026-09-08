@@ -1,7 +1,9 @@
 # Vocably — Diccionario: buscar palabras a mano y añadirlas
 
 **Fecha:** 2026-09-07
-**Estado:** aprobado en brainstorming, pendiente de plan de implementación
+**Estado:** implementado y fundido en `main` el 2026-09-08 (commit `fd2b5d6`)
+**Enmendado:** 2026-09-08 — dos decisiones cambiaron durante la implementación y
+están marcadas abajo con *(enmienda)*. Lo que queda sin construir está en §12.
 **Diseño general:** `docs/superpowers/specs/2026-09-06-app-vocabulario-design.md`
 **Fase 2 (terminada):** `docs/superpowers/specs/2026-09-06-fase-2-repaso-design.md`
 **Datos ya medidos y descargados:** `/Users/yijun/Vocably-diccionario/` (ver su `LEEME.md`)
@@ -27,7 +29,7 @@ sigue siendo lo único que cuesta dinero.
 |---|---|---|
 | Fuente del diccionario | Wikcionario en inglés, vía el volcado de kaikki.org | Cubre palabras, verbos frasales e idioms; licencia libre |
 | Significado | **En inglés** | Es donde Wikcionario es bueno; traducir definiciones da español torpe (medido) |
-| Traducción al español | Un traductor gratuito, cacheado para siempre | Wikcionario solo trae español en el 1,8 % de las entradas |
+| Traducción al español | Un traductor gratuito, cacheado solo cuando no hay ambigüedad *(enmienda, §8)* | Wikcionario solo trae español en el 1,8 % de las entradas |
 | Nivel del MCER | Lo pone la usuaria al guardar | Depende de la acepción y del criterio del profesor; es lo que peor haría una IA |
 | Papel de Claude | Un botón opcional de "afinar" | Criterio de la usuaria: que salga gratis |
 | Dónde vive el diccionario | **Postgres** | 36 MB sobre 500 MB gratis; evita inventar un sistema de trozos y su cargador |
@@ -45,7 +47,7 @@ La búsqueda recorre cuatro escalones y para en el primero que responde:
 |---|---|---|---|
 | 1 | La biblioteca de la usuaria | instantáneo | 0 € |
 | 2 | La tabla del diccionario | instantáneo | 0 € |
-| 3 | El traductor, solo si falta el español | ~1 s, y se guarda para siempre | 0 € |
+| 3 | El traductor, solo si falta el español | ~1 s; se guarda solo si no hay ambigüedad *(enmienda, §8)* | 0 € |
 | 4 | Claude, solo si la usuaria pulsa "afinar" | ~3 s | céntimos partidos |
 
 **Si el término ya está en la biblioteca**, sale marcado como *"ya está en tu
@@ -57,11 +59,20 @@ otra vez, salvo que sea una acepción distinta de las que ya tiene.
 - el **significado en inglés**;
 - un **ejemplo** de uso corriente;
 - la **traducción al español**;
+- un campo para **escribir la traducción a mano** *(enmienda)*;
 - un selector de **nivel del MCER, sin valor por defecto**;
 - un botón **Añadir**.
 
 Sin nivel elegido, el botón no guarda: obligar a elegir es lo que evita una
 biblioteca llena de niveles inventados.
+
+**El campo de traducción a mano** *(enmienda, 2026-09-08)* no estaba en el diseño
+original y se añadió al construirlo. Sin él, una palabra que el traductor no supiera
+resolver —porque el servicio esté caído, o porque no tenga esa entrada— solo se podía
+añadir pulsando el botón que cuesta dinero. Eso contradice el criterio de la usuaria,
+que es que el diccionario salga gratis. Si escribe algo en ese campo, es lo que se
+guarda; si no, se guarda lo que traiga el traductor. Y le sirve además como profesora:
+muchas veces la traducción que quiere en la tarjeta la sabe ella mejor.
 
 **Estilo:** los tokens y componentes del sistema visual de la fase 2, sin añadir
 capas decorativas. La usuaria pidió expresamente mantener las pantallas simples.
@@ -194,10 +205,28 @@ petición. Un término son unos 10 caracteres. **Se empieza sin correo**: mandar
 correo de la usuaria a un tercero en cada consulta es una decisión suya, no una
 opción por defecto.
 
-**La caché es lo que hace esto robusto.** Cada traducción se guarda en su fila del
-diccionario: un término se traduce una vez en la vida. Si el servicio se cae, lo ya
-buscado sigue funcionando y lo nuevo sale sin traducción, con un aviso claro y el
-botón de afinar con Claude.
+**La caché es lo que hace esto robusto, pero solo cachea lo que puede.**
+*(enmienda, 2026-09-08.)* El diseño original decía que un término se traduce una vez
+en la vida y su traducción se guarda para siempre. Al construirlo se vio que eso
+guardaba una mentira: **el traductor traduce el término, no la acepción**, así que
+escribir su respuesta en cada fila la etiqueta como algo que no es. Buscar `bank`
+—el ejemplo de esta misma especificación— dejaba sus siete etimologías con "banco",
+la de *orilla* incluida, y al quedar cacheado no se reintentaba nunca: la única
+corrección posible era el botón de pago.
+
+La regla, tal como quedó:
+
+- Se llama al traductor **una sola vez por término**, y su respuesta se **muestra**
+  en todas las acepciones que no traigan español. Eso no cambia.
+- Se **guarda** en la base solo cuando hay **exactamente una acepción sin español**,
+  que es el único caso en que el dato es de verdad de esa acepción.
+- Con varias, se muestra sin guardar. Volver a preguntar a MyMemory es gratis: la
+  cuota anónima da unas 500 consultas al día para una sola usuaria.
+
+Si el servicio se cae, lo ya guardado sigue funcionando y lo nuevo sale sin
+traducción, con un aviso claro, el campo para escribirla a mano y el botón de afinar
+con Claude. La llamada lleva un tiempo de espera de 5 segundos: un servicio colgado
+no puede tumbar una búsqueda que ya tiene listos el significado y el ejemplo.
 
 **El botón de afinar** manda el término y su significado en inglés a Claude y
 devuelve una traducción curada. Es el único punto que cuesta dinero, se pulsa a
@@ -216,7 +245,8 @@ Con Vitest, sobre lo que puede fallar en silencio:
   ficha guardada como *one*.
 - **El filtro de basura**: una glosa *"Used other than figuratively…"* no llega a
   la pantalla.
-- **La caché del traductor**: dos búsquedas del mismo término, una sola llamada. Las
+- **La caché del traductor**: dos búsquedas del mismo término, una sola llamada. Y
+  que con varias acepciones sin español no se guarde nada *(enmienda, §8)*. Las
   pruebas no tocan la red; el traductor se inyecta.
 
 **Prueba manual antes de dar esto por terminado:** la usuaria busca cinco palabras
@@ -242,3 +272,33 @@ Del 1 al 4 la pantalla ya sirve. Del 5 en adelante es mejora.
 - Sugerencias mientras se escribe
 - Corrección de erratas ("quisiste decir…")
 - Editar el diccionario: es material de consulta, no datos de la usuaria
+
+## 12. Lo que quedó sin construir
+
+*(Añadido el 2026-09-08, al fundir la implementación.)* Esto no es "fuera de
+alcance": es alcance de esta especificación que no llegó al código. Se anota aquí
+para que nadie lo dé por hecho leyendo las secciones de arriba.
+
+**La §5 pide que las acepciones se muestren "agrupadas por categoría gramatical".**
+La pantalla las enseña en una lista plana, ordenada por identificador, con la
+categoría escrita en cada ficha. Con siete fichas de `bank` de golpe, agruparlas se
+notaría. Pendiente.
+
+**Nada se ha probado en pantalla.** La implementación se hizo en un espacio aislado
+sin base de datos, así que ninguna búsqueda real ha ocurrido nunca. Sigue pendiente
+la prueba manual que la §9 pone como condición para dar esto por terminado.
+
+**Dos pasos manuales**, que no forman parte del despliegue automático:
+
+```bash
+DATABASE_URL='...' npx drizzle-kit push
+DATABASE_URL='...' npm run cargar:diccionario -- ~/Vocably-diccionario/dicc_todo.jsonl.gz
+```
+
+**Una carrera conocida y aceptada.** La fuente "Diccionario" se crea con un
+`SELECT` seguido de un `INSERT`, y `sources.title` no tiene restricción de unicidad
+—no puede tenerla: dos extracciones del mismo libro son a propósito dos fuentes
+distintas—. Dos peticiones simultáneas podrían crear dos filas "Diccionario". Se
+deja así a propósito: la §7 decide resolver la procedencia sin tocar el esquema, es
+una aplicación de una sola usuaria, y la consecuencia es cosmética; no se pierde
+ningún término ni ninguna ficha de repaso.
