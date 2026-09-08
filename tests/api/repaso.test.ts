@@ -54,6 +54,46 @@ describe("GET /api/repaso/cola", () => {
     expect(body.cartas[0].term).toBe("come across");
   });
 
+  it("responder toda la cola gasta el tope diario, y la siguiente recarga llega vacía", async () => {
+    // El beforeEach ya guardó un término ("come across"); se añaden más para
+    // tener 10 nuevas disponibles en total con las que distinguir "se acabó
+    // el cupo de hoy" de "no queda ninguna carta por delante": si el tope no
+    // se arrastrara entre peticiones, aquí seguirían saliendo cartas de las
+    // 8 que quedan sin responder.
+    await saveExtraction(db, {
+      title: "Libro",
+      pageStart: 1,
+      pageEnd: 5,
+      level: "B2",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      items: Array.from({ length: 9 }, (_, i) => ({
+        term: `palabra${i}`,
+        type: "word" as const,
+        translation: `traducción${i}`,
+        context: `Frase con palabra${i}.`,
+        example: `Ejemplo con palabra${i}.`,
+      })),
+    });
+    await setNewCardsPerDay(db, 2);
+
+    const primera = await GET(new Request("http://localhost/api/repaso/cola"));
+    const cartas = (await primera.json()).cartas as { termId: number }[];
+    expect(cartas).toHaveLength(2);
+
+    // Se responden las dos: el cupo del día queda gastado. La ruta deriva
+    // `now` del propio servidor (`new Date()`), no de nada que mande el
+    // cliente, así que estas respuestas cuentan contra el día de hoy sin más;
+    // y `introducidasHoy` arrastra esa cuenta a través del límite HTTP hasta
+    // la petición siguiente.
+    for (const carta of cartas) {
+      await POST(post({ answerId: `a${carta.termId}`, termId: carta.termId, rating: 3 }));
+    }
+    const segunda = await GET(new Request("http://localhost/api/repaso/cola"));
+    expect((await segunda.json()).cartas).toHaveLength(0);
+  });
+
   it("un tamaño de sesión guardado manda sobre el tope diario de nuevas", async () => {
     // El equivalente de "adelantar nuevas" ya no es un parámetro aparte: es
     // pedir un tamaño de sesión explícito en modo "no-aprendidas", que manda
