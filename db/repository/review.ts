@@ -6,7 +6,7 @@ import { State, fsrs, type Grade } from "ts-fsrs";
 import { toFsrsCard, fromFsrsCard } from "@/lib/fsrs";
 import { inicioDelDia } from "@/lib/dia";
 import { formatearPlazo } from "@/lib/plazo";
-import { componerSesion, type Grupos } from "@/lib/repaso/coleccion";
+import { componerSesion, type Grupos, type VencidosFuera } from "@/lib/repaso/coleccion";
 import type { Modo } from "@/lib/ajustes";
 
 const programador = fsrs();
@@ -47,16 +47,16 @@ export type OpcionesCola = {
   aleatorio?: () => number;
 };
 
+/**
+ * El tipo, y con él los dos contadores, vive en `lib/repaso/coleccion.ts`, que
+ * es quien los calcula. Se reexporta porque la pantalla los lee y es un módulo
+ * de cliente: así importa un tipo del mismo sitio del que ya importa `Cola`.
+ */
+export type { VencidosFuera };
+
 export type Cola = {
   cartas: CartaCola[];
-  /**
-   * Repasos que vencían hoy y que el límite por sesión dejó fuera. No se han
-   * perdido: siguen vencidos y entran en la sesión siguiente. La pantalla lo
-   * dice, porque un límite por debajo del ritmo diario acumula atrasos en
-   * silencio hasta que la cola es impagable.
-   */
-  repasosFuera: number;
-};
+} & VencidosFuera;
 
 /**
  * Cuántas tarjetas nuevas se han introducido hoy.
@@ -83,7 +83,11 @@ async function introducidasHoy(db: Database, ahora: Date): Promise<number> {
  * La cola del día, recogida en cuatro grupos:
  *
  *  - **En curso** (aprendizaje o reaprendizaje): palabras falladas hace
- *    minutos.
+ *    minutos, y **solo las que ya vencen**. Las que el programador ha puesto
+ *    para dentro de un rato se descartan sin entrar en ningún grupo: no se
+ *    adelantan (adelantar lo que acabas de fallar no adelanta nada) y por eso
+ *    tampoco cuentan como pendientes. Lo que queda aquí es trabajo de hoy, y
+ *    `enCursoFuera` cuenta lo que de aquí no entre en la sesión.
  *  - **Aprendidas vencidas**: ya tocan hoy.
  *  - **Nuevas**: nunca respondidas.
  *  - **Aprendidas futuras**: ya aprendidas pero que aún no vencen. Antes de
@@ -263,10 +267,20 @@ export type ResumenColecciones = {
   hoy: { sinAprender: number; aprendidas: number };
   /** Todo lo disponible, incluido lo que habría que adelantar. */
   total: { sinAprender: number; aprendidas: number };
+  /**
+   * Cuántas tarjetas hay en la biblioteca, sin filtrar por estado ni por fecha.
+   * Es el único contador que sirve para saber si hay vocabulario: los otros
+   * cuatro filtran a propósito, así que los cuatro pueden dar 0 con la
+   * biblioteca llena —toda en aprendizaje y todavía sin vencer, que es lo que
+   * pasa a los pocos segundos de fallar unas cuantas palabras—. Deducirlo de
+   * ellos hacía que la pantalla previa dijera "No tienes ninguna palabra
+   * todavía" y mandara a añadir vocabulario que ya estaba ahí.
+   */
+  biblioteca: number;
 };
 
 /**
- * Los contadores de la pantalla previa. Cuatro `count` sobre una tabla, en vez
+ * Los contadores de la pantalla previa. Cinco `count` sobre una tabla, en vez
  * de construir la cola entera y medirla: la pantalla se pinta antes de que el
  * usuario haya elegido nada, y construir la cola implica calcular los cuatro
  * plazos de cada carta con FSRS.
@@ -276,7 +290,8 @@ export type ResumenColecciones = {
  * vez de recogerlas en un grupo aparte (a diferencia de las aprendidas
  * futuras, que sí se guardan para poder adelantarlas). Si `total.sinAprender`
  * las contara, la pantalla ofrecería "no aprendidas" con tarjetas y la sesión
- * volvería vacía.
+ * volvería vacía. Justo por eso hace falta `biblioteca`: es el único recuento
+ * que no filtra, y el único del que se puede deducir que no hay vocabulario.
  */
 export async function contarColecciones(db: Database, ahora: Date): Promise<ResumenColecciones> {
   const [fila] = await db
@@ -285,6 +300,7 @@ export async function contarColecciones(db: Database, ahora: Date): Promise<Resu
       enCursoVencidas: sql<number>`count(*) filter (where ${cardStates.state} in (${State.Learning}, ${State.Relearning}) and ${cardStates.due} <= ${ahora})::int`,
       aprendidasVencidas: sql<number>`count(*) filter (where ${cardStates.state} = ${State.Review} and ${cardStates.due} <= ${ahora})::int`,
       aprendidasTotal: sql<number>`count(*) filter (where ${cardStates.state} = ${State.Review})::int`,
+      biblioteca: sql<number>`count(*)::int`,
     })
     .from(cardStates);
 
@@ -302,5 +318,6 @@ export async function contarColecciones(db: Database, ahora: Date): Promise<Resu
       sinAprender: enCurso + nuevas,
       aprendidas: fila?.aprendidasTotal ?? 0,
     },
+    biblioteca: fila?.biblioteca ?? 0,
   };
 }

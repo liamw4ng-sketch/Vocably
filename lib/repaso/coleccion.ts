@@ -16,11 +16,36 @@ export function coleccionDe(state: number): Coleccion {
 }
 
 export type Grupos<T> = {
+  /**
+   * En aprendizaje o reaprendizaje y **ya vencidas**: quien reúne los grupos
+   * descarta las que aún no vencen, porque adelantar una palabra que acabas de
+   * fallar no es adelantar nada. `enCursoFuera` cuenta sobre esa premisa: todo
+   * lo que hay aquí es trabajo de hoy.
+   */
   enCurso: T[];
   nuevas: T[];
   aprendidasVencidas: T[];
   /** Aprendidas que aún no vencían, **ya ordenadas por fecha ascendente**. */
   aprendidasFuturas: T[];
+};
+
+/**
+ * Lo vencido hoy que la sesión dejó fuera, repartido por colección. No se ha
+ * perdido nada: sigue vencido y entra en la sesión siguiente. La pantalla lo
+ * dice, porque una sesión por debajo del ritmo diario acumula atrasos en
+ * silencio hasta que la cola es impagable.
+ *
+ * Van por separado y no sumados porque quien lo lee tiene que decidir con qué
+ * modo se sigue, y no hay ningún modo que traiga las dos: "aprendidas" nunca
+ * cuela una en curso y "no aprendidas" nunca cuela un repaso. Un solo número
+ * diría cuántas quedan pero no a cuál de las dos colecciones ir a buscarlas, y
+ * un botón que lleva a la colección equivocada devuelve una sesión vacía.
+ */
+export type VencidosFuera = {
+  /** Aprendidas vencidas que no entraron, por el número pedido o por el modo. */
+  repasosFuera: number;
+  /** En curso vencidas que no entraron, por lo mismo. */
+  enCursoFuera: number;
 };
 
 export type OpcionesSesion = {
@@ -50,7 +75,7 @@ type Tramo<T> = { cartas: T[]; sortear: boolean };
 export function componerSesion<T>(
   grupos: Grupos<T>,
   opciones: OpcionesSesion,
-): { cartas: T[]; repasosFuera: number } {
+): { cartas: T[] } & VencidosFuera {
   const { modo, cuantas, limiteNuevas, aleatorio } = opciones;
   const sinRecorte = cuantas === 0;
 
@@ -86,8 +111,17 @@ export function componerSesion<T>(
     cartas.push(...fuente.slice(0, hueco));
   }
 
+  // Los dos grupos vencidos se miden igual. Contar solo las aprendidas era
+  // cierto mientras las en curso entraban siempre; ahora las descartan tanto el
+  // modo ("aprendidas" no cuela ninguna) como un número menor que el grupo, y
+  // sin contarlas la pantalla felicita por haber terminado con palabras
+  // falladas hace minutos todavía vencidas.
   const dentro = new Set(cartas);
-  const repasosFuera = grupos.aprendidasVencidas.filter((c) => !dentro.has(c)).length;
+  const fuera = (grupo: T[]) => grupo.filter((c) => !dentro.has(c)).length;
 
-  return { cartas, repasosFuera };
+  return {
+    cartas,
+    repasosFuera: fuera(grupos.aprendidasVencidas),
+    enCursoFuera: fuera(grupos.enCurso),
+  };
 }

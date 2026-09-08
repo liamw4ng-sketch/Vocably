@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { CartaCola, Cola, ResumenColecciones } from "@/db/repository/review";
+import type {
+  CartaCola,
+  Cola,
+  ResumenColecciones,
+  VencidosFuera,
+} from "@/db/repository/review";
 import {
   MODOS,
   MODO_POR_DEFECTO,
@@ -287,23 +292,56 @@ export function modoDisponible(
   return MODOS.find((otro) => puedeEmpezar(resumen, otro, cuantas)) ?? modo;
 }
 
+/** Todo lo que venció hoy y no entró en la sesión, sumadas las dos colecciones. */
+export function vencidosFuera(fuera: VencidosFuera): number {
+  return fuera.repasosFuera + fuera.enCursoFuera;
+}
+
+/**
+ * El aviso de lo que queda pendiente para hoy.
+ *
+ * Fuera del JSX por lo mismo que `resumenLegible`: la concordancia de un texto
+ * compuesto dentro de una expresión de render no se puede leer sin montar el
+ * componente. Habla de "repasos" a secas porque para la usuaria lo son: una
+ * palabra fallada hace diez minutos y ya vencida es tan trabajo de hoy como un
+ * repaso de las aprendidas.
+ */
+export function mensajeVencidosFuera(fuera: VencidosFuera): string {
+  const total = vencidosFuera(fuera);
+  return total === 1
+    ? "Queda 1 repaso más para hoy que no entró en esta sesión."
+    : `Quedan ${total} repasos más para hoy que no entraron en esta sesión.`;
+}
+
 /**
  * Con qué modo sigue "Seguir repasando".
  *
- * Ese botón sale cuando `repasosFuera` es distinto de 0, y `repasosFuera`
- * cuenta repasos **vencidos de aprendidas** que la sesión dejó fuera. En
- * "no aprendidas" los deja fuera el modo mismo —no ningún límite—, así que
- * repetir la elección traería una cola vacía y el mismo botón, en bucle. Se
- * sigue con "aprendidas", que es el modo que sí puede traerlos. Los otros dos
- * ya los incluyen: allí lo que sobra es cosa del número y repetirlo funciona.
+ * Ese botón sale cuando quedó algo vencido fuera de la sesión, y lo que quedó
+ * puede ser de cualquiera de las dos colecciones: el modo elegido descarta una
+ * entera ("aprendidas" nunca cuela una en curso, "no aprendidas" nunca cuela un
+ * repaso) y un número corto recorta la que sí entraba. Seguir con un modo que
+ * no alcanza lo pendiente devuelve una cola vacía y el mismo botón, en bucle,
+ * así que se elige el modo que sí lo alcanza:
+ *
+ * - pendientes en las dos → "mezcla", el único que las trae juntas;
+ * - pendientes en una → el modo elegido si ya la cubre, y si no, el suyo.
+ *
+ * Se prefiere el modo elegido cuando sirve —"mezcla" cubre las dos— para no
+ * moverle la elección al usuario sin necesidad.
  */
-export function modoParaSeguir(modo: Modo): Modo {
-  return modo === "no-aprendidas" ? "aprendidas" : modo;
+export function modoParaSeguir(modo: Modo, fuera: VencidosFuera): Modo {
+  const faltanAprendidas = fuera.repasosFuera > 0;
+  const faltanEnCurso = fuera.enCursoFuera > 0;
+  if (faltanAprendidas && faltanEnCurso) return "mezcla";
+  if (faltanAprendidas) return modo === "mezcla" ? "mezcla" : "aprendidas";
+  if (faltanEnCurso) return modo === "mezcla" ? "mezcla" : "no-aprendidas";
+  // Sin nada pendiente el botón no se enseña; devolver el elegido es lo inocuo.
+  return modo;
 }
 
 /**
  * Lo que dice el botón "Seguir", dado el modo con el que arrancó la sesión que
- * se acaba de terminar.
+ * se acaba de terminar y lo que quedó fuera.
  *
  * Fuera del JSX por el mismo motivo que `resumenLegible`: un texto compuesto
  * dentro de una expresión de render no se puede leer sin montar el componente,
@@ -311,8 +349,8 @@ export function modoParaSeguir(modo: Modo): Modo {
  * sale de `ETIQUETA_MODO`, así que es literalmente el del botón de la pantalla
  * previa: dos nombres para la misma colección serían dos colecciones.
  */
-export function etiquetaSeguir(modoSesion: Modo): string {
-  const siguiente = modoParaSeguir(modoSesion);
+export function etiquetaSeguir(modoSesion: Modo, fuera: VencidosFuera): string {
+  const siguiente = modoParaSeguir(modoSesion, fuera);
   return siguiente === modoSesion
     ? "Seguir repasando"
     : `Seguir con "${ETIQUETA_MODO[siguiente]}"`;
@@ -370,6 +408,22 @@ export function resumenLegible(resumen: ResumenColecciones): {
       aprendidas === 1 ? "aprendida" : "aprendidas"
     }`,
   };
+}
+
+/**
+ * Si de verdad no hay nada que repasar porque no hay vocabulario.
+ *
+ * Mira `biblioteca`, el único contador sin filtro, y no la suma de los totales:
+ * esos dos dejan fuera a propósito las que están en curso y aún no vencen, así
+ * que con toda la biblioteca en aprendizaje —lo normal a los pocos segundos de
+ * fallar unas cuantas— daban cero y la pantalla mandaba a extraer un PDF o a
+ * buscar en el diccionario palabras que ya estaban guardadas.
+ *
+ * Estaba escrito dentro del JSX, que es exactamente por lo que ninguna prueba
+ * lo cogió: aquí se puede leer, como sus vecinas.
+ */
+export function bibliotecaVacia(resumen: ResumenColecciones): boolean {
+  return resumen.biblioteca === 0;
 }
 
 /**
@@ -477,10 +531,12 @@ export function SesionRepaso() {
   // la pantalla rota y solo después la buena.
   const modoEfectivo = resumen ? modoDisponible(resumen, modo, cuantas) : modo;
 
-  // Repasos vencidos hoy que esta sesión dejó fuera, sea por el número pedido o
-  // por el modo. Se lee al pedir la cola y se enseña al terminar: sin esto, una
-  // sesión por debajo del ritmo diario acumula atrasos sin que nada lo diga.
-  const [repasosFuera, setRepasosFuera] = useState(0);
+  // Lo vencido hoy que esta sesión dejó fuera, sea por el número pedido o por
+  // el modo, repartido por colección. Se lee al pedir la cola y se enseña al
+  // terminar: sin esto, una sesión por debajo del ritmo diario acumula atrasos
+  // sin que nada lo diga. Las dos cuentan por separado porque de ellas depende
+  // con qué modo sigue el botón; ver `modoParaSeguir`.
+  const [fuera, setFuera] = useState<VencidosFuera>({ repasosFuera: 0, enCursoFuera: 0 });
 
   // Se lee después de cada `await` para no tocar el estado tras desmontar. Es
   // un ref y no una variable de efecto porque lo comparten todas las funciones
@@ -614,7 +670,7 @@ export function SesionRepaso() {
         const cola = await pedirCola(modoElegido, cuantas);
         if (!montadoRef.current) return;
         setCartas(cola.cartas);
-        setRepasosFuera(cola.repasosFuera);
+        setFuera({ repasosFuera: cola.repasosFuera, enCursoFuera: cola.enCursoFuera });
         setModoSesion(modoElegido);
         setSesion(crearSesion(cola.cartas, { enviar: enviarRespuesta }));
         setRevelada(false);
@@ -643,7 +699,7 @@ export function SesionRepaso() {
 
   /** "Seguir repasando": otra sesión con lo que quedó fuera, sin guardar nada.
    * El modo puede no ser el mismo; `modoParaSeguir` explica por qué. */
-  const modoSeguir = modoParaSeguir(modoSesion);
+  const modoSeguir = modoParaSeguir(modoSesion, fuera);
   const seguir = useCallback(
     () => arrancar(modoSeguir, null),
     [arrancar, modoSeguir],
@@ -721,9 +777,8 @@ export function SesionRepaso() {
   // adelantar, que eran casos particulares de elegir qué y cuánto repasar.
   if (estado === "antes" && resumen) {
     const legible = resumenLegible(resumen);
-    const biblioteca = resumen.total.sinAprender + resumen.total.aprendidas;
 
-    if (biblioteca === 0) {
+    if (bibliotecaVacia(resumen)) {
       return (
         <Tarjeta className="flex flex-col gap-4">
           <h1 style={TEXTO_4} className="font-semibold">
@@ -764,6 +819,11 @@ export function SesionRepaso() {
                 // material hoy, el marcado es al que se ha caído la elección.
                 // Marcado y desactivado a la vez es una pantalla sin salida.
                 variante={opcion === modoEfectivo ? "primario" : "secundario"}
+                // El color no puede ser la única señal de cuál está elegido:
+                // con esto un lector de pantalla lo dice, igual que el
+                // `role="progressbar"` de la barra o el `role="alert"` de los
+                // avisos de este mismo fichero.
+                aria-pressed={opcion === modoEfectivo}
                 disabled={!puedeEmpezar(resumen, opcion, cuantas)}
                 onClick={() => {
                   setModo(opcion);
@@ -884,6 +944,10 @@ export function SesionRepaso() {
     // `conteo`, no `resumen`: ese nombre ya es el de los contadores de la
     // pantalla previa, y aquí se cuentan las respuestas de la sesión.
     const conteo = sesion.resumen();
+    // Lo que queda vencido para hoy, de las dos colecciones. Un solo número
+    // aquí porque la pantalla solo decide si enseñar el bloque; a cuál de las
+    // dos ir a buscarlo lo decide `modoParaSeguir`.
+    const pendientes = vencidosFuera(fuera);
     const perdidas = sesion.fallidas();
     const terminosPerdidos = perdidas
       .map((termId) => cartas.find((c) => c.termId === termId)?.term ?? `#${termId}`)
@@ -900,10 +964,11 @@ export function SesionRepaso() {
               ? "Has repasado 1 tarjeta."
               : `Has repasado ${conteo.total} tarjetas.`}
           </p>
-          {/* Solo si de verdad no queda nada: con repasos fuera de la sesión,
-              tres bloques más abajo se dice cuántos quedan, y felicitar por
-              haber terminado justo encima de eso es mentir. */}
-          {repasosFuera === 0 ? (
+          {/* Solo si de verdad no queda nada, contando también las palabras en
+              curso que el modo o el número dejaron fuera: con algo pendiente,
+              tres bloques más abajo se dice cuánto queda, y felicitar por haber
+              terminado justo encima de eso es mentir. */}
+          {pendientes === 0 ? (
             <p style={TEXTO_2} className="font-medium">
               Buen trabajo, ya has terminado por hoy.
             </p>
@@ -945,19 +1010,17 @@ export function SesionRepaso() {
         {avisoGuardado}
 
         {/* Puede quedar algo fuera por el número pedido, pero también por el
-            modo: "no aprendidas" deja fuera todos los repasos vencidos sin que
-            haya ningún límite de por medio. Por eso el botón puede tener que
-            cambiar de colección: repetir ese modo daría una cola vacía y el
-            mismo botón, en bucle. */}
-        {repasosFuera > 0 ? (
+            modo: "no aprendidas" deja fuera todos los repasos vencidos y
+            "aprendidas" todas las palabras en curso, sin que haya ningún límite
+            de por medio. Por eso el botón puede tener que cambiar de colección:
+            repetir ese modo daría una cola vacía y el mismo botón, en bucle. */}
+        {pendientes > 0 ? (
           <div className="flex flex-col gap-3 border-t border-borde pt-4">
             <p style={TEXTO_2} className="text-texto-suave">
-              {repasosFuera === 1
-                ? "Queda 1 repaso más para hoy que no entró en esta sesión."
-                : `Quedan ${repasosFuera} repasos más para hoy que no entraron en esta sesión.`}
+              {mensajeVencidosFuera(fuera)}
             </p>
             <Boton variante="primario" disabled={empezando} onClick={() => void seguir()}>
-              {empezando ? "Preparando…" : etiquetaSeguir(modoSesion)}
+              {empezando ? "Preparando…" : etiquetaSeguir(modoSesion, fuera)}
             </Boton>
           </div>
         ) : null}
@@ -967,7 +1030,7 @@ export function SesionRepaso() {
         </Boton>
 
         <Boton
-          variante={repasosFuera > 0 ? "secundario" : "primario"}
+          variante={pendientes > 0 ? "secundario" : "primario"}
           onClick={() => router.push("/biblioteca")}
         >
           Volver a la biblioteca

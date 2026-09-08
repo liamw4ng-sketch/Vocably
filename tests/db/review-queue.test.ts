@@ -376,14 +376,16 @@ describe("getDueQueue", () => {
     await setSessionSize(db, 4);
 
     for (const semilla of [1, 2, 3, 4, 5]) {
-      const { cartas, repasosFuera } = await getDueQueue(db, {
+      const { cartas, repasosFuera, enCursoFuera } = await getDueQueue(db, {
         now: AHORA,
         aleatorio: generador(semilla),
       });
       expect(cartas).toHaveLength(4);
       expect(cartas.map((c) => c.termId)).toEqual(expect.arrayContaining([6, 7]));
-      // El recuento de las que quedan fuera cuenta solo aprendidas: 5 - 2.
+      // Cada colección lleva su propio recuento: 5 - 2 aprendidas fuera, y
+      // ninguna en curso, que es justo lo que esta prueba defiende.
       expect(repasosFuera).toBe(3);
+      expect(enCursoFuera).toBe(0);
     }
   });
 
@@ -466,6 +468,54 @@ describe("modos de sesión", () => {
     const cartas = await cartasDe({ now: AHORA, modo: "aprendidas" });
 
     expect(cartas.map((c) => c.termId)).toEqual([termIds[0]]);
+  });
+});
+
+/**
+ * Las dos reproducciones de la revisión final. En las dos, la sesión descartaba
+ * palabras falladas hacía minutos —vencidas, por tanto trabajo de hoy— sin
+ * contarlas en ningún sitio: la pantalla de fin de sesión felicitaba por haber
+ * terminado y escondía el botón que llevaba a ellas.
+ */
+describe("las en curso vencidas que la sesión deja fuera", () => {
+  it("el modo aprendidas las descarta enteras y las cuenta aparte", async () => {
+    const { termIds } = await guardarConIds([termino(1), termino(2)]);
+    await madurar([termIds[0]]);
+    await enAprendizaje([termIds[1]]);
+
+    const cola = await getDueQueue(db, { now: AHORA, modo: "aprendidas", cuantas: 0 });
+
+    expect(cola.cartas.map((c) => c.termId)).toEqual([termIds[0]]);
+    expect(cola.repasosFuera).toBe(0);
+    expect(cola.enCursoFuera).toBe(1);
+  });
+
+  it("un número menor que las en curso las recorta y cuenta el resto", async () => {
+    const { termIds } = await guardarConIds([termino(1), termino(2), termino(3)]);
+    await enAprendizaje(termIds);
+
+    const cola = await getDueQueue(db, { now: AHORA, modo: "mezcla", cuantas: 1 });
+
+    expect(cola.cartas).toHaveLength(1);
+    expect(cola.repasosFuera).toBe(0);
+    expect(cola.enCursoFuera).toBe(2);
+  });
+
+  it("las en curso que aún no vencen no cuentan: no son trabajo de hoy", async () => {
+    // Contarlas sería peor que no contarlas: el botón "Seguir" prometería una
+    // sesión que `getDueQueue` no puede llenar, porque esas cartas se descartan
+    // antes de llegar a ningún grupo.
+    const { termIds } = await guardarConIds([termino(1), termino(2)]);
+    await madurar([termIds[0]]);
+    await db
+      .update(cardStates)
+      .set({ state: 1, reps: 1, due: new Date("2026-09-11T09:00:00Z") })
+      .where(eq(cardStates.termId, termIds[1]));
+
+    const cola = await getDueQueue(db, { now: AHORA, modo: "mezcla", cuantas: 0 });
+
+    expect(cola.cartas.map((c) => c.termId)).toEqual([termIds[0]]);
+    expect(cola.enCursoFuera).toBe(0);
   });
 });
 

@@ -335,6 +335,35 @@ Esto aplica las dos migraciones pendientes de una vez:
 `DATABASE_URL` explícitamente en el propio comando, con la cadena de conexión
 real de Neon.
 
+Después llegaron `drizzle/0003_lame_cassandra_nova.sql` y
+`drizzle/0004_youthful_zarda.sql` (las tablas del diccionario, ya aplicadas), y
+la de la pantalla previa del repaso: `drizzle/0005_organic_scorpion.sql`, que
+añade `session_size` y `session_mode` a `settings` y borra
+`reviews_per_session`.
+
+**`drizzle-kit push` no ejecuta esos ficheros `.sql`.** Compara `db/schema.ts`
+con la base de datos real y propone él mismo las sentencias, preguntando por
+cada una que pueda perder datos. El orden cuidadoso de
+`0005_organic_scorpion.sql` —los dos `ADD COLUMN` primero y el `DROP COLUMN` al
+final— protege a la suite de pruebas, que sí ejecuta el fichero, y no a
+producción.
+
+Por eso hay que leer lo que pregunta en vez de ir aceptando. Tres columnas
+cambian a la vez y `push` puede ofrecer interpretarlo como un **renombrado**:
+si se acepta renombrar `reviews_per_session` a `session_mode`, esa columna se
+queda con tipo `integer` donde el esquema espera `text` y sin `session_size`
+ninguno, y `getAjustes` falla en todas las peticiones. Las respuestas correctas
+son crear dos columnas nuevas y borrar la vieja: tres cambios, ningún
+renombrado.
+
+**La migración no pierde datos.** Las dos columnas nuevas llegan con valor por
+defecto (`session_size` a 0, `session_mode` a `'mezcla'`), así que una fila ya
+existente las recibe rellenas y una tabla vacía sigue vacía. Lo único que puede
+perderse es el valor de `reviews_per_session`, y su defecto era 0, exactamente
+el defecto del nuevo `session_size`: quien no lo hubiera tocado —en producción
+la tabla `settings` estaba vacía— no pierde nada en absoluto. Vale igual haya
+fila o no.
+
 ### 4. Verificar que la migración funcionó
 
 Comprobar que las columnas y la tabla nuevas existen:
@@ -345,13 +374,28 @@ SELECT column_name FROM information_schema.columns
 SELECT column_name FROM information_schema.columns
   WHERE table_name = 'review_logs' AND column_name = 'answer_id';
 SELECT to_regclass('public.settings');
+SELECT column_name, data_type FROM information_schema.columns
+  WHERE table_name = 'settings' AND column_name IN ('session_size', 'session_mode');
+```
+
+Las tres primeras deben devolver una fila (la tercera, el nombre `settings` en
+vez de `NULL`). La cuarta debe devolver **dos**, y con los tipos exactos:
+`session_size` `integer` y `session_mode` `text`. Si `session_mode` sale
+`integer`, se aceptó el renombrado del paso 3: hay que borrar esa columna y
+volver a pasar `push` antes de desplegar.
+
+Y comprobar que la columna vieja ya no está:
+
+```sql
 SELECT column_name FROM information_schema.columns
   WHERE table_name = 'settings' AND column_name = 'reviews_per_session';
 ```
 
-Las cuatro deben devolver una fila (la tercera, el nombre `settings` en vez de
-`NULL`). Y comprobar que el vocabulario existente sigue intacto, comparando
-con el número anotado en el paso 2:
+Esta es la única de la lista que se comprueba al revés: debe devolver **cero
+filas**. Mientras siga ahí, `push` no ha aplicado la migración entera.
+
+Y comprobar que el vocabulario existente sigue intacto, comparando con el
+número anotado en el paso 2:
 
 ```sql
 SELECT count(*) FROM terms;
@@ -443,7 +487,7 @@ verifique todo lo siguiente:
   `/repaso`. No consume la API de Claude en ningún momento (ver "Coste").
   Pendiente solo la prueba de aceptación de más arriba, que hace el usuario en
   su móvil.
-- La suite completa suma **400 pruebas**, ninguna contra la API de Claude ni
+- La suite completa suma **421 pruebas**, ninguna contra la API de Claude ni
   contra MyMemory ni contra una base de datos real.
 - **No hay pruebas de componentes.** Vitest corre con `environment: "node"`,
   sin jsdom ni Testing Library, así que ninguna prueba puede pulsar un botón

@@ -58,6 +58,7 @@ describe("contarColecciones", () => {
     expect(await contarColecciones(db, AHORA)).toEqual({
       hoy: { sinAprender: 0, aprendidas: 0 },
       total: { sinAprender: 0, aprendidas: 0 },
+      biblioteca: 0,
     });
   });
 
@@ -114,5 +115,44 @@ describe("contarColecciones", () => {
 
     expect(resumen.hoy.sinAprender).toBe(0);
     expect(resumen.total.sinAprender).toBe(0);
+  });
+});
+
+/**
+ * `biblioteca` es el único contador que no filtra nada. Existe porque los otros
+ * cuatro sí filtran a propósito, y de ellos no se puede deducir si hay
+ * vocabulario: con toda la biblioteca en aprendizaje y todavía sin vencer, los
+ * cuatro dan 0 y la pantalla previa decía "No tienes ninguna palabra todavía" y
+ * mandaba a añadir vocabulario que ya estaba ahí.
+ */
+describe("contarColecciones, el recuento de la biblioteca", () => {
+  it("cuenta las tarjetas que ninguna de las dos columnas ve", async () => {
+    // La reproducción: tres palabras respondidas "Otra vez" hace un momento.
+    // Quedan en aprendizaje y sin vencer todavía.
+    const { termIds } = await guardarConIds([termino(1), termino(2), termino(3)]);
+    for (const termId of termIds) {
+      await db
+        .update(cardStates)
+        .set({ state: 1, reps: 1, due: new Date("2026-09-10T09:01:00Z") })
+        .where(eq(cardStates.termId, termId));
+    }
+
+    const resumen = await contarColecciones(db, AHORA);
+
+    expect(resumen.total).toEqual({ sinAprender: 0, aprendidas: 0 });
+    expect(resumen.biblioteca).toBe(3);
+  });
+
+  it("cuenta también lo que sí ven las dos columnas, sin duplicar", async () => {
+    const { termIds } = await guardarConIds([termino(1), termino(2), termino(3)]);
+    await madurar([termIds[0]]);
+    await db
+      .update(cardStates)
+      .set({ state: 1, reps: 1, due: new Date("2026-09-10T08:50:00Z") })
+      .where(eq(cardStates.termId, termIds[1]));
+
+    const resumen = await contarColecciones(db, AHORA);
+
+    expect(resumen.biblioteca).toBe(3);
   });
 });

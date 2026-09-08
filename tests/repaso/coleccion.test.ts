@@ -206,3 +206,57 @@ describe("componerSesion, repasosFuera", () => {
     expect(repasosFuera).toBe(2);
   });
 });
+
+/**
+ * Las "en curso" que entran aquí ya vencen todas (quien las reúne descarta las
+ * que no), así que una que se queda fuera es trabajo pendiente de hoy exactamente
+ * igual que un repaso de aprendidas. Antes no se contaba en ningún sitio, y la
+ * pantalla de fin de sesión felicitaba por haber terminado con palabras falladas
+ * hacía minutos ya vencidas y sin ningún botón que llevara a ellas.
+ */
+describe("componerSesion, enCursoFuera", () => {
+  it("un número menor que las en curso las recorta y cuenta las que deja fuera", () => {
+    const { cartas, enCursoFuera, repasosFuera } = componerSesion(
+      grupos({ enCurso: [carta(1), carta(2), carta(3)] }),
+      { modo: "mezcla", cuantas: 1, limiteNuevas: 10 },
+    );
+
+    expect(ids(cartas)).toEqual([1]);
+    expect(enCursoFuera).toBe(2);
+    expect(repasosFuera).toBe(0);
+  });
+
+  it("el modo aprendidas las descarta enteras y las cuenta", () => {
+    const { cartas, enCursoFuera, repasosFuera } = componerSesion(
+      grupos({ enCurso: [carta(1), carta(2)], aprendidasVencidas: [carta(3)] }),
+      { modo: "aprendidas", cuantas: 0, limiteNuevas: 10 },
+    );
+
+    expect(ids(cartas)).toEqual([3]);
+    expect(enCursoFuera).toBe(2);
+    expect(repasosFuera).toBe(0);
+  });
+
+  it("es cero cuando entran todas", () => {
+    const { enCursoFuera } = componerSesion(
+      grupos({ enCurso: [carta(1), carta(2)], aprendidasVencidas: [carta(3)] }),
+      { modo: "mezcla", cuantas: 0, limiteNuevas: 10 },
+    );
+
+    expect(enCursoFuera).toBe(0);
+  });
+
+  it("las dos colecciones se cuentan por separado, no revueltas", () => {
+    const { cartas, enCursoFuera, repasosFuera } = componerSesion(
+      grupos({
+        enCurso: [carta(1), carta(2)],
+        aprendidasVencidas: [carta(3), carta(4), carta(5)],
+      }),
+      { modo: "mezcla", cuantas: 3, limiteNuevas: 10, aleatorio: () => 0 },
+    );
+
+    expect(cartas).toHaveLength(3);
+    expect(enCursoFuera).toBe(0);
+    expect(repasosFuera).toBe(2);
+  });
+});

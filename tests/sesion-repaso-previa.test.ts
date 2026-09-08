@@ -4,24 +4,39 @@ import {
   puedeEmpezar,
   validarCuantas,
   resumenLegible,
+  bibliotecaVacia,
   modoDisponible,
   modoParaSeguir,
   etiquetaSeguir,
+  vencidosFuera,
+  mensajeVencidosFuera,
   ajustesARecordar,
   ETIQUETA_MODO,
 } from "@/components/SesionRepaso";
 import { MODOS, MAXIMO_TAMANO_SESION } from "@/lib/ajustes";
-import type { ResumenColecciones } from "@/db/repository/review";
+import { componerSesion } from "@/lib/repaso/coleccion";
+import type { ResumenColecciones, VencidosFuera } from "@/db/repository/review";
 
 /** El único mensaje de error que da `validarCuantas`, sea cual sea el motivo. */
 const MENSAJE_RANGO = `Debe ser un número entero entre 0 y ${MAXIMO_TAMANO_SESION}.`;
 
+/**
+ * Por defecto la biblioteca es lo que suman los contadores totales, que es el
+ * caso corriente. Las pruebas que separan las dos cosas pasan el tercer
+ * argumento a mano.
+ */
 function resumen(
   hoy: { sinAprender: number; aprendidas: number },
   total = hoy,
+  biblioteca = total.sinAprender + total.aprendidas,
 ): ResumenColecciones {
-  return { hoy, total };
+  return { hoy, total, biblioteca };
 }
+
+const SOLO_APRENDIDAS: VencidosFuera = { repasosFuera: 2, enCursoFuera: 0 };
+const SOLO_EN_CURSO: VencidosFuera = { repasosFuera: 0, enCursoFuera: 2 };
+const LAS_DOS: VencidosFuera = { repasosFuera: 2, enCursoFuera: 2 };
+const NADA_FUERA: VencidosFuera = { repasosFuera: 0, enCursoFuera: 0 };
 
 describe("disponibles", () => {
   it("no-aprendidas solo mira la columna de sin aprender", () => {
@@ -146,6 +161,26 @@ describe("resumenLegible", () => {
   });
 });
 
+describe("bibliotecaVacia", () => {
+  it("los contadores a cero no significan biblioteca vacía", () => {
+    // La reproducción: tres palabras respondidas "Otra vez". Quedan en
+    // aprendizaje y sin vencer, y ni `hoy` ni `total` las ven —a propósito,
+    // porque la cola tampoco las serviría—. Deducir de ahí que no hay
+    // vocabulario mandaba a la usuaria a añadir palabras que ya tenía.
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 3);
+    expect(bibliotecaVacia(r)).toBe(false);
+  });
+
+  it("sin ninguna tarjeta sí está vacía", () => {
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 0);
+    expect(bibliotecaVacia(r)).toBe(true);
+  });
+
+  it("con material para hoy tampoco está vacía", () => {
+    expect(bibliotecaVacia(resumen({ sinAprender: 2, aprendidas: 1 }))).toBe(false);
+  });
+});
+
 describe("modoDisponible", () => {
   it("respeta el modo elegido mientras tenga material", () => {
     const r = resumen({ sinAprender: 3, aprendidas: 9 });
@@ -191,43 +226,102 @@ describe("modoDisponible", () => {
   });
 });
 
+describe("vencidosFuera", () => {
+  it("suma las dos colecciones: lo que queda pendiente hoy es lo mismo venga de donde venga", () => {
+    expect(vencidosFuera({ repasosFuera: 2, enCursoFuera: 3 })).toBe(5);
+    expect(vencidosFuera(NADA_FUERA)).toBe(0);
+  });
+
+  it("una sola pendiente va en singular", () => {
+    expect(mensajeVencidosFuera({ repasosFuera: 0, enCursoFuera: 1 })).toBe(
+      "Queda 1 repaso más para hoy que no entró en esta sesión.",
+    );
+    expect(mensajeVencidosFuera({ repasosFuera: 1, enCursoFuera: 0 })).toBe(
+      "Queda 1 repaso más para hoy que no entró en esta sesión.",
+    );
+  });
+
+  it("de dos en adelante, plural, y cuenta las dos juntas", () => {
+    expect(mensajeVencidosFuera({ repasosFuera: 1, enCursoFuera: 2 })).toBe(
+      "Quedan 3 repasos más para hoy que no entraron en esta sesión.",
+    );
+  });
+});
+
 describe("modoParaSeguir", () => {
-  it('"no aprendidas" no puede traer los repasos que dejó fuera: se sigue con "aprendidas"', () => {
-    // `repasosFuera` cuenta repasos vencidos fuera de la sesión. En este modo
-    // los deja fuera el modo mismo, no ningún límite: repetirlo daría una cola
-    // vacía una y otra vez.
-    expect(modoParaSeguir("no-aprendidas")).toBe("aprendidas");
+  it('"no aprendidas" no puede traer los repasos de aprendidas que dejó fuera: se sigue con "aprendidas"', () => {
+    // En ese modo los deja fuera el modo mismo, no ningún límite: repetirlo
+    // daría una cola vacía una y otra vez.
+    expect(modoParaSeguir("no-aprendidas", SOLO_APRENDIDAS)).toBe("aprendidas");
   });
 
-  it("los otros dos modos sí los traen: se sigue con el mismo", () => {
-    expect(modoParaSeguir("aprendidas")).toBe("aprendidas");
-    expect(modoParaSeguir("mezcla")).toBe("mezcla");
+  it("los otros dos modos sí traen las aprendidas: se sigue con el mismo", () => {
+    expect(modoParaSeguir("aprendidas", SOLO_APRENDIDAS)).toBe("aprendidas");
+    expect(modoParaSeguir("mezcla", SOLO_APRENDIDAS)).toBe("mezcla");
   });
 
-  it("nunca devuelve el modo que no puede traer repasos vencidos", () => {
+  it("si lo que queda son palabras en curso, se sigue con un modo que las traiga", () => {
+    // "Aprendidas" nunca cuela una en curso, ni vencida: seguir con ese modo
+    // sería el mismo bucle vacío, solo que en la otra dirección.
+    expect(modoParaSeguir("aprendidas", SOLO_EN_CURSO)).toBe("no-aprendidas");
+    expect(modoParaSeguir("no-aprendidas", SOLO_EN_CURSO)).toBe("no-aprendidas");
+    expect(modoParaSeguir("mezcla", SOLO_EN_CURSO)).toBe("mezcla");
+  });
+
+  it("si quedan de las dos colecciones, solo mezcla las alcanza", () => {
     for (const modo of MODOS) {
-      expect(modoParaSeguir(modo)).not.toBe("no-aprendidas");
+      expect(modoParaSeguir(modo, LAS_DOS)).toBe("mezcla");
+    }
+  });
+
+  it("el modo con el que se sigue siempre trae algo: nunca es un botón en bucle", () => {
+    // Se compone de verdad la sesión siguiente con lo que quedó pendiente. Si
+    // el modo elegido no cubriera la colección que tiene pendientes,
+    // `componerSesion` devolvería una lista vacía y el botón repetiría la misma
+    // pantalla para siempre.
+    for (const fuera of [SOLO_APRENDIDAS, SOLO_EN_CURSO, LAS_DOS]) {
+      for (const modo of MODOS) {
+        for (const cuantas of [0, 1]) {
+          const { cartas } = componerSesion(
+            {
+              enCurso: Array.from({ length: fuera.enCursoFuera }, (_, i) => ({ id: 100 + i })),
+              nuevas: [],
+              aprendidasVencidas: Array.from({ length: fuera.repasosFuera }, (_, i) => ({
+                id: 200 + i,
+              })),
+              aprendidasFuturas: [],
+            },
+            { modo: modoParaSeguir(modo, fuera), cuantas, limiteNuevas: 0 },
+          );
+          expect(cartas.length).toBeGreaterThan(0);
+        }
+      }
     }
   });
 
   it("el botón dice a qué colección se sigue cuando cambia", () => {
     // El texto vivía escrito a mano dentro del JSX, que es lo mismo que
     // produjo "Hoy tienes 1 palabras". Aquí se puede leer.
-    expect(etiquetaSeguir("no-aprendidas")).toBe('Seguir con "Aprendidas"');
+    expect(etiquetaSeguir("no-aprendidas", SOLO_APRENDIDAS)).toBe('Seguir con "Aprendidas"');
+    expect(etiquetaSeguir("aprendidas", SOLO_EN_CURSO)).toBe('Seguir con "No aprendidas"');
+    expect(etiquetaSeguir("aprendidas", LAS_DOS)).toBe('Seguir con "Mezcla"');
   });
 
   it("sin cambio de colección, el botón dice lo de siempre", () => {
-    expect(etiquetaSeguir("aprendidas")).toBe("Seguir repasando");
-    expect(etiquetaSeguir("mezcla")).toBe("Seguir repasando");
+    expect(etiquetaSeguir("aprendidas", SOLO_APRENDIDAS)).toBe("Seguir repasando");
+    expect(etiquetaSeguir("mezcla", SOLO_APRENDIDAS)).toBe("Seguir repasando");
+    expect(etiquetaSeguir("no-aprendidas", SOLO_EN_CURSO)).toBe("Seguir repasando");
   });
 
   it("el nombre que enseña es el mismo del botón de la pantalla previa", () => {
     // Dos nombres distintos para la misma colección serían dos colecciones a
     // ojos del usuario.
-    for (const modo of MODOS) {
-      const etiqueta = etiquetaSeguir(modo);
-      if (etiqueta !== "Seguir repasando") {
-        expect(etiqueta).toBe(`Seguir con "${ETIQUETA_MODO[modoParaSeguir(modo)]}"`);
+    for (const fuera of [SOLO_APRENDIDAS, SOLO_EN_CURSO, LAS_DOS]) {
+      for (const modo of MODOS) {
+        const etiqueta = etiquetaSeguir(modo, fuera);
+        if (etiqueta !== "Seguir repasando") {
+          expect(etiqueta).toBe(`Seguir con "${ETIQUETA_MODO[modoParaSeguir(modo, fuera)]}"`);
+        }
       }
     }
   });

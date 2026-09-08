@@ -91,6 +91,33 @@ describe("/api/ajustes", () => {
     expect((await PATCH(patch({ sessionSize: 9999 }))).status).toBe(400);
   });
 
+  it("devuelve el modo de sesión, 'mezcla' por defecto", async () => {
+    expect((await (await GET()).json()).sessionMode).toBe("mezcla");
+  });
+
+  it("cambia el modo de sesión y lo persiste", async () => {
+    // Es el ajuste que escribe "Recordar esta elección", y no tenía ni una
+    // prueba: ni el guardián `esModo` ni su mensaje de error se ejercitaban.
+    expect((await PATCH(patch({ sessionMode: "aprendidas" }))).status).toBe(200);
+    expect((await (await GET()).json()).sessionMode).toBe("aprendidas");
+  });
+
+  it("rechaza un modo que no existe, y lo dice en español", async () => {
+    const res = await PATCH(patch({ sessionMode: "todas" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(
+      "El modo de sesión debe ser uno de: no-aprendidas, aprendidas, mezcla.",
+    );
+    // Y no ha guardado nada por el camino.
+    expect((await (await GET()).json()).sessionMode).toBe("mezcla");
+  });
+
+  it("guarda modo y número en la misma petición: es lo que hace 'Recordar esta elección'", async () => {
+    expect((await PATCH(patch({ sessionSize: 25, sessionMode: "no-aprendidas" }))).status).toBe(200);
+    const body = await (await GET()).json();
+    expect(body).toMatchObject({ sessionSize: 25, sessionMode: "no-aprendidas" });
+  });
+
   it("rechaza un cuerpo que no trae ningún ajuste", async () => {
     // Sin esto, un error de nombre en el cliente devolvería 200 y no
     // guardaría nada: el usuario vería el campo aceptado y el valor perdido.
