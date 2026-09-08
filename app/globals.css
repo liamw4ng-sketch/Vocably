@@ -121,3 +121,52 @@ body {
     animation: none;
   }
 }
+
+/* Entrada al abrir la aplicación: el nombre aparece, se sostiene un momento y
+   la capa entera se va.
+
+   Una vez por carga de página y nunca al navegar, sin nada de JavaScript: el
+   elemento vive en el layout, que el App Router no vuelve a montar al cambiar
+   de ruta, así que la animación solo arranca cuando la página se carga entera.
+   Ver components/ui/EntradaApp.tsx. */
+@keyframes entrada-app {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes entrada-app-nombre {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animacion-entrada {
+  /* Sin `forwards` a propósito: el reposo es el `opacity: 0` en línea del
+     componente, así que la capa es invisible antes de la animación, después, y
+     también si esta hoja no ha llegado todavía. */
+  animation: entrada-app 900ms ease-out;
+}
+
+.animacion-entrada > p {
+  animation: entrada-app-nombre 400ms ease-out both;
+}
+
+/* Con movimiento reducido no hay entrada: sin animación, la capa se queda en
+   su reposo, que es el `opacity: 0` en línea. Es la única defensa, porque aquí
+   ya no hay JavaScript que decida nada. */
+@media (prefers-reduced-motion: reduce) {
+  .animacion-entrada,
+  .animacion-entrada > p {
+    animation: none;
+  }
+}

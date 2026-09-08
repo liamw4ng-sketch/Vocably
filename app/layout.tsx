@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Bricolage_Grotesque } from "next/font/google";
+import { BarraNavegacion } from "@/components/ui/BarraNavegacion";
+import { EntradaApp } from "@/components/ui/EntradaApp";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -28,7 +30,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="es"
       className={`${fraunces.variable} ${bricolageGrotesque.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      {/* La barra va aquí y no en cada página: una sola lista de destinos, y
+          ninguna pantalla puede volver a olvidarse de enlazar a otra. Decide
+          ella misma si le toca salir, así que en `/login` no aparece. */}
+      <body className="min-h-full flex flex-col">
+        {children}
+        <BarraNavegacion />
+        <EntradaApp />
+      </body>
     </html>
   );
 }
