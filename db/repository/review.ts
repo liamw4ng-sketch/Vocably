@@ -1,4 +1,4 @@
-import { and, eq, asc, gte, count, type SQL } from "drizzle-orm";
+import { and, eq, asc, gte, count, sql, type SQL } from "drizzle-orm";
 import { terms, termOccurrences, cardStates, sources, reviewLogs } from "@/db/schema";
 import { getAjustes } from "@/db/repository/settings";
 import type { Database } from "@/db/types";
@@ -256,4 +256,51 @@ export async function applyAnswer(
 
     return { aplicada: true, proximaFecha: card.due };
   });
+}
+
+export type ResumenColecciones = {
+  /** Lo que entraría hoy sin pedir nada: lo vencido, con el tope diario puesto. */
+  hoy: { sinAprender: number; aprendidas: number };
+  /** Todo lo disponible, incluido lo que habría que adelantar. */
+  total: { sinAprender: number; aprendidas: number };
+};
+
+/**
+ * Los contadores de la pantalla previa. Cuatro `count` sobre una tabla, en vez
+ * de construir la cola entera y medirla: la pantalla se pinta antes de que el
+ * usuario haya elegido nada, y construir la cola implica calcular los cuatro
+ * plazos de cada carta con FSRS.
+ *
+ * `sinAprender` cuenta solo lo EN CURSO YA VENCIDO (más las nuevas): igual que
+ * `getDueQueue`, que tira sin más las Learning/Relearning que aún no vencen en
+ * vez de recogerlas en un grupo aparte (a diferencia de las aprendidas
+ * futuras, que sí se guardan para poder adelantarlas). Si `total.sinAprender`
+ * las contara, la pantalla ofrecería "no aprendidas" con tarjetas y la sesión
+ * volvería vacía.
+ */
+export async function contarColecciones(db: Database, ahora: Date): Promise<ResumenColecciones> {
+  const [fila] = await db
+    .select({
+      nuevas: sql<number>`count(*) filter (where ${cardStates.state} = ${State.New})::int`,
+      enCursoVencidas: sql<number>`count(*) filter (where ${cardStates.state} in (${State.Learning}, ${State.Relearning}) and ${cardStates.due} <= ${ahora})::int`,
+      aprendidasVencidas: sql<number>`count(*) filter (where ${cardStates.state} = ${State.Review} and ${cardStates.due} <= ${ahora})::int`,
+      aprendidasTotal: sql<number>`count(*) filter (where ${cardStates.state} = ${State.Review})::int`,
+    })
+    .from(cardStates);
+
+  const nuevas = fila?.nuevas ?? 0;
+  const enCurso = fila?.enCursoVencidas ?? 0;
+  const tope = (await getAjustes(db)).newCardsPerDay;
+  const cupo = Math.max(0, tope - (await introducidasHoy(db, ahora)));
+
+  return {
+    hoy: {
+      sinAprender: enCurso + Math.min(nuevas, cupo),
+      aprendidas: fila?.aprendidasVencidas ?? 0,
+    },
+    total: {
+      sinAprender: enCurso + nuevas,
+      aprendidas: fila?.aprendidasTotal ?? 0,
+    },
+  };
 }

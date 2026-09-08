@@ -1,15 +1,32 @@
 import { NextResponse } from "next/server";
 import { getDueQueue } from "@/db/repository/review";
+import { esModo } from "@/lib/ajustes";
 import { getDb } from "@/db/client";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  const modo = url.searchParams.get("modo");
+  const cuantas = url.searchParams.get("cuantas");
+  const numero = cuantas === null ? undefined : Number(cuantas);
+
+  // Un parámetro ilegible no se ignora en silencio: sin esto, un `cuantas=hola`
+  // daría NaN, `componerSesion` no recortaría nada y el usuario recibiría una
+  // sesión distinta de la que pidió sin que nada se lo dijera.
+  if (numero !== undefined && (!Number.isInteger(numero) || numero < 0)) {
+    return NextResponse.json(
+      { error: "El número de tarjetas debe ser un entero no negativo." },
+      { status: 400 },
+    );
+  }
+
   // Se devuelve la cola entera: `cartas` y `repasosFuera`, que la pantalla
   // necesita para decir cuántos repasos quedaron fuera del límite.
   const cola = await getDueQueue(getDb(), {
     now: new Date(),
     source: url.searchParams.get("source") ?? undefined,
     type: url.searchParams.get("type") ?? undefined,
+    modo: esModo(modo) ? modo : undefined,
+    cuantas: numero,
   });
   return NextResponse.json(cola);
 }
