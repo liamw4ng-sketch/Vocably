@@ -88,20 +88,25 @@ async function pedirAjustes(): Promise<Ajustes> {
   return (await respuesta.json()) as Ajustes;
 }
 
-/** Devuelve el valor guardado, o un mensaje de error en español si el servidor
- * lo rechazó o si la petición ni siquiera pudo hacerse (sin conexión, DNS,
- * servidor caído): en ese caso `fetch` lanza, y sin capturarlo aquí la
- * llamante se quedaría con el `await` colgado para siempre. */
-export async function guardarAjuste(
-  campo: CampoAjuste,
-  valor: number,
-): Promise<{ valor: number } | { error: string }> {
+/** Lo que se puede cambiar de una vez. `PATCH /api/ajustes` acepta uno de los
+ * tres ajustes o varios a la vez, así que guardar modo y número al empezar es
+ * una sola petición y no dos idas y vueltas antes de pedir la cola. */
+type CambioAjustes = Partial<Ajustes>;
+
+/** Guarda los ajustes que se le pasen y devuelve los que el servidor dice
+ * tener, o un mensaje de error en español si los rechazó o si la petición ni
+ * siquiera pudo hacerse (sin conexión, DNS, servidor caído): en ese caso
+ * `fetch` lanza, y sin capturarlo aquí la llamante se quedaría con el `await`
+ * colgado para siempre. */
+async function guardarAjustes(
+  cambios: CambioAjustes,
+): Promise<{ ajustes: Partial<Ajustes> } | { error: string }> {
   let respuesta: Response;
   try {
     respuesta = await fetch("/api/ajustes", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ [campo]: valor }),
+      body: JSON.stringify(cambios),
     });
   } catch {
     return { error: "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo otra vez." };
@@ -112,25 +117,19 @@ export async function guardarAjuste(
   if (!respuesta.ok) {
     return { error: cuerpo?.error ?? "No se pudo guardar el cambio." };
   }
-  return { valor: cuerpo?.[campo] ?? valor };
+  return { ajustes: cuerpo ?? {} };
 }
 
-/**
- * Guardar el modo es igual que guardar un número, pero el valor no es numérico
- * y `guardarAjuste` valida y revierte pensando en enteros.
- */
-async function guardarModo(modo: Modo): Promise<{ error: string } | null> {
-  try {
-    const respuesta = await fetch("/api/ajustes", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionMode: modo }),
-    });
-    if (!respuesta.ok) return { error: "No se pudo guardar el modo." };
-  } catch {
-    return { error: "No se pudo conectar con el servidor." };
-  }
-  return null;
+/** Un solo ajuste numérico, que es lo que necesita `useAjusteNumerico`: mismo
+ * guardado que el de arriba, pero devolviendo el número para poder revertir el
+ * campo al último valor bueno. */
+export async function guardarAjuste(
+  campo: CampoAjuste,
+  valor: number,
+): Promise<{ valor: number } | { error: string }> {
+  const resultado = await guardarAjustes({ [campo]: valor });
+  if ("error" in resultado) return resultado;
+  return { valor: resultado.ajustes[campo] ?? valor };
 }
 
 /**
@@ -271,6 +270,68 @@ export function puedeEmpezar(
 }
 
 /**
+ * Con qué modo se va a repasar de verdad.
+ *
+ * El modo elegido puede quedarse sin material: quien guarda "No aprendidas"
+ * agota el cupo diario de nuevas y, al volver a entrar, ese botón saldría
+ * marcado y desactivado a la vez, con "Empezar" en gris y sin decir por qué.
+ * Se cae al primero que sí puede. Si no puede ninguno se queda el elegido: no
+ * hay ninguno mejor al que ir y la pantalla ya dice que hoy no toca nada.
+ */
+export function modoDisponible(
+  resumen: ResumenColecciones,
+  modo: Modo,
+  cuantas: number,
+): Modo {
+  if (puedeEmpezar(resumen, modo, cuantas)) return modo;
+  return MODOS.find((otro) => puedeEmpezar(resumen, otro, cuantas)) ?? modo;
+}
+
+/**
+ * Con qué modo sigue "Seguir repasando".
+ *
+ * Ese botón sale cuando `repasosFuera` es distinto de 0, y `repasosFuera`
+ * cuenta repasos **vencidos de aprendidas** que la sesión dejó fuera. En
+ * "no aprendidas" los deja fuera el modo mismo —no ningún límite—, así que
+ * repetir la elección traería una cola vacía y el mismo botón, en bucle. Se
+ * sigue con "aprendidas", que es el modo que sí puede traerlos. Los otros dos
+ * ya los incluyen: allí lo que sobra es cosa del número y repetirlo funciona.
+ */
+export function modoParaSeguir(modo: Modo): Modo {
+  return modo === "no-aprendidas" ? "aprendidas" : modo;
+}
+
+/**
+ * El titular de la pantalla previa y su línea de detalle.
+ *
+ * Fuera del JSX para poder probar la concordancia: "Hoy tienes 1 palabras" era
+ * lo que se leía el último repaso de cada día, que no es un caso raro sino el
+ * final de todos los días.
+ */
+export function resumenLegible(resumen: ResumenColecciones): {
+  titulo: string;
+  detalle: string;
+} {
+  const { sinAprender, aprendidas } = resumen.hoy;
+  const hoy = sinAprender + aprendidas;
+
+  if (hoy === 0) {
+    return {
+      titulo: "Hoy no toca ninguna palabra",
+      detalle:
+        "Estás al día. Si quieres seguir, pon un número y se adelantan las que vengan después.",
+    };
+  }
+
+  return {
+    titulo: `Hoy tienes ${hoy} ${hoy === 1 ? "palabra" : "palabras"}`,
+    detalle: `${sinAprender} sin aprender · ${aprendidas} ${
+      aprendidas === 1 ? "aprendida" : "aprendidas"
+    }`,
+  };
+}
+
+/**
  * Lo tecleado en "Cuántas", ya validado. Es la misma comprobación que hace
  * `useAjusteNumerico` antes de guardar, pero suelta: "Cuántas" no se guarda al
  * salir del campo —vale solo para esta sesión salvo que se marque la casilla—
@@ -349,6 +410,15 @@ export function SesionRepaso() {
   const [cuantasError, setCuantasError] = useState("");
   const [recordar, setRecordar] = useState(false);
   const [empezando, setEmpezando] = useState(false);
+  // Por qué no se pudo recordar la elección. No para el repaso —empezar es lo
+  // que se ha pedido, guardar la preferencia es lo secundario—, pero tiene que
+  // decirse: sin esto la casilla parece rota al ver los valores viejos la
+  // próxima vez.
+  const [avisoAjustes, setAvisoAjustes] = useState("");
+  // El modo con el que arrancó la sesión que se está repasando. No siempre es
+  // `modo`: "Seguir repasando" puede cambiarlo (ver `modoParaSeguir`), y la
+  // pantalla de fin de sesión tiene que hablar del que se usó.
+  const [modoSesion, setModoSesion] = useState<Modo>(MODO_POR_DEFECTO);
 
   // Se valida en cada render, no al salir del campo: así lo que se pide es
   // siempre lo que se está viendo. Con un valor imposible se usa 0 para los
@@ -357,14 +427,19 @@ export function SesionRepaso() {
   const cuantasVale = "valor" in cuantasValidado;
   const cuantas = "valor" in cuantasValidado ? cuantasValidado.valor : 0;
 
+  // El modo que se enseña marcado y con el que se empieza. Se deriva en cada
+  // render en vez de corregir `modo` con un efecto: el efecto pintaría primero
+  // la pantalla rota y solo después la buena.
+  const modoEfectivo = resumen ? modoDisponible(resumen, modo, cuantas) : modo;
+
   // Repasos vencidos hoy que esta sesión dejó fuera, sea por el número pedido o
   // por el modo. Se lee al pedir la cola y se enseña al terminar: sin esto, una
   // sesión por debajo del ritmo diario acumula atrasos sin que nada lo diga.
   const [repasosFuera, setRepasosFuera] = useState(0);
 
-  // Se lee dentro de callbacks async (valorar) para no tocar estado tras
-  // desmontar, igual que el guard `cancelado` del efecto de carga inicial de
-  // abajo, pero aquí como ref porque el disparador es un evento, no un efecto.
+  // Se lee después de cada `await` para no tocar el estado tras desmontar. Es
+  // un ref y no una variable de efecto porque lo comparten todas las funciones
+  // async del componente, las disparen eventos o efectos.
   const montadoRef = useRef(true);
   useEffect(() => {
     montadoRef.current = true;
@@ -374,63 +449,77 @@ export function SesionRepaso() {
   }, []);
 
   // El tope diario sí es un ajuste permanente: se guarda al salir del campo,
-  // como siempre. Ya no hacen falta ni un `ajustesCargaFallo` ni un ref de "ya
-  // lo he pedido": los ajustes llegan en la carga inicial, y si esa falla,
-  // falla la pantalla entera y hay un botón para reintentarla.
+  // como siempre. No pide su valor por su cuenta: los ajustes llegan todos en
+  // la carga de la pantalla previa, y si esa falla, falla la pantalla entera y
+  // hay un botón para reintentarla.
   const topeNuevas = useAjusteNumerico("newCardsPerDay", TOPE_MAXIMO_TARJETAS_NUEVAS, montadoRef);
+  // `fijar` es estable (useCallback sin dependencias); sacarlo del objeto deja
+  // la dependencia de `cargarPrevia` bien puesta sin desactivar la regla.
+  const fijarTope = topeNuevas.fijar;
 
-  // Carga inicial: función async dentro del efecto con su guard, igual que en
-  // TermTable, para no encadenar renders desde el cuerpo del efecto. No pide la
-  // cola: qué cola pedir se decide en la pantalla previa.
-  useEffect(() => {
-    let cancelado = false;
+  // ¿Han llegado ya los ajustes guardados a los campos? Si la carga inicial
+  // falla no han llegado, porque un `Promise.all` que rechaza tira también el
+  // resultado bueno: reintentar tiene que volver a pedirlos y no solo los
+  // contadores. Y si ya llegaron no se vuelven a sembrar: lo que haya tecleado
+  // el usuario desde entonces es su elección y machacarla sería otro fallo.
+  const ajustesSembradosRef = useRef(false);
 
-    async function cargarInicial() {
-      try {
-        const [datos, ajustes] = await Promise.all([pedirResumen(), pedirAjustes()]);
-        if (cancelado) return;
-        setResumen(datos);
+  /**
+   * La pantalla previa entera: contadores y, la primera vez, ajustes. Sirve
+   * para las tres cosas que llevan al mismo sitio: la carga al montar,
+   * "Reintentar" cuando algo falló y "Volver a elegir" al terminar una sesión.
+   *
+   * No toca el estado hasta después del `await`: quien la llama decide antes
+   * qué se ve mientras tanto.
+   */
+  const cargarPrevia = useCallback(async () => {
+    try {
+      const sembrar = !ajustesSembradosRef.current;
+      const [datos, ajustes] = await Promise.all([
+        pedirResumen(),
+        sembrar ? pedirAjustes() : null,
+      ]);
+      if (!montadoRef.current) return;
+      setResumen(datos);
+      if (ajustes) {
         // El servidor ya devuelve un modo válido, pero lo que llega por la red
         // es JSON sin comprobar: un valor viejo dejaría los tres botones sin
         // marcar y no habría manera de saber qué se iba a repasar.
         setModo(esModo(ajustes.sessionMode) ? ajustes.sessionMode : MODO_POR_DEFECTO);
-        topeNuevas.fijar(ajustes.newCardsPerDay);
+        fijarTope(ajustes.newCardsPerDay);
         // El número guardado solo siembra el campo: a partir de aquí vive en
         // el borrador y no vuelve al servidor si no se marca la casilla.
         setCuantasBorrador(String(ajustes.sessionSize));
-        setEstado("antes");
-      } catch {
-        if (!cancelado) setEstado("error");
+        setCuantasError("");
+        ajustesSembradosRef.current = true;
       }
-    }
-
-    void cargarInicial();
-    return () => {
-      cancelado = true;
-    };
-    // `fijar` es estable (useCallback sin dependencias) y esto se hace una sola
-    // vez, al montar.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /**
-   * Vuelve a la pantalla previa con los contadores al día. Sirve para las dos
-   * cosas que llevan al mismo sitio: reintentar cuando la carga falló —el
-   * error ocurre antes de que exista ninguna cola, así que lo que hay que
-   * volver a pedir es el resumen— y volver a elegir al terminar una sesión.
-   */
-  const recargar = useCallback(async () => {
-    setSesion(null);
-    setEstado("cargando");
-    try {
-      const datos = await pedirResumen();
-      if (!montadoRef.current) return;
-      setResumen(datos);
       setEstado("antes");
     } catch {
       if (montadoRef.current) setEstado("error");
     }
-  }, []);
+  }, [fijarTope]);
+
+  // Al montar no hay nada que vaciar: "cargando" y sin sesión ya es el estado
+  // inicial, así que el efecto solo pide. La función intermedia deja a la vista
+  // que el estado no se toca hasta después del primer `await`; sin ella,
+  // `react-hooks/set-state-in-effect` lee la llamada como un setState síncrono
+  // en el cuerpo del efecto.
+  useEffect(() => {
+    async function cargar() {
+      await cargarPrevia();
+    }
+    void cargar();
+  }, [cargarPrevia]);
+
+  /**
+   * Volver a la pantalla previa desde un botón ("Reintentar" y "Volver a
+   * elegir"): se deja la sesión y se enseña el "Cargando…" antes de pedir.
+   */
+  const volverAElegir = useCallback(() => {
+    setSesion(null);
+    setEstado("cargando");
+    void cargarPrevia();
+  }, [cargarPrevia]);
 
   /**
    * Los contadores otra vez, sin vaciar la pantalla: se usa al cambiar el tope
@@ -447,32 +536,66 @@ export function SesionRepaso() {
     }
   }, []);
 
-  /** Arranca la sesión con lo elegido: aquí, y solo aquí, se pide la cola. */
-  const empezar = useCallback(async () => {
-    setEmpezando(true);
-    try {
-      // Aquí, y solo aquí, se guardan modo y número: sin la casilla marcada la
-      // elección vale para esta sesión y nada más. Se guarda ANTES de pedir la
-      // cola: si la cola falla, la preferencia ya quedó guardada, que es lo que
-      // el usuario pidió al marcarla.
-      if (recordar) {
-        await guardarAjuste("sessionSize", cuantas);
-        await guardarModo(modo);
+  /**
+   * Arranca una sesión: aquí, y solo aquí, se pide la cola. El modo se pasa
+   * porque no siempre es el elegido —"Seguir repasando" puede cambiarlo—, y
+   * `guardar` porque esa continuación no debe tocar los ajustes: la casilla
+   * habla de la elección de la pantalla previa, no del modo al que se cae.
+   */
+  const arrancar = useCallback(
+    async (modoElegido: Modo, guardar: boolean) => {
+      setEmpezando(true);
+      try {
+        // Aquí, y solo aquí, se guardan modo y número: sin la casilla marcada
+        // la elección vale para esta sesión y nada más. Se guarda ANTES de
+        // pedir la cola —si la cola falla, la preferencia ya quedó guardada, que
+        // es lo que el usuario pidió al marcarla— y en una sola petición, que
+        // la ruta acepta varios ajustes a la vez.
+        if (guardar) {
+          const guardado = await guardarAjustes({
+            sessionSize: cuantas,
+            sessionMode: modoElegido,
+          });
+          if (!montadoRef.current) return;
+          // Un fallo aquí no para el repaso, pero se dice: si no, la próxima
+          // visita enseña los valores viejos y la casilla parece rota.
+          setAvisoAjustes(
+            "error" in guardado
+              ? `${guardado.error} Tu elección no se ha guardado para la próxima vez.`
+              : "",
+          );
+        }
+        const cola = await pedirCola(modoElegido, cuantas);
+        if (!montadoRef.current) return;
+        setCartas(cola.cartas);
+        setRepasosFuera(cola.repasosFuera);
+        setModoSesion(modoElegido);
+        setSesion(crearSesion(cola.cartas, { enviar: enviarRespuesta }));
+        setRevelada(false);
+        setGuardando(false);
+        setEstado("lista");
+      } catch {
+        if (montadoRef.current) setEstado("error");
+      } finally {
+        if (montadoRef.current) setEmpezando(false);
       }
-      const cola = await pedirCola(modo, cuantas);
-      if (!montadoRef.current) return;
-      setCartas(cola.cartas);
-      setRepasosFuera(cola.repasosFuera);
-      setSesion(crearSesion(cola.cartas, { enviar: enviarRespuesta }));
-      setRevelada(false);
-      setGuardando(false);
-      setEstado("lista");
-    } catch {
-      if (montadoRef.current) setEstado("error");
-    } finally {
-      if (montadoRef.current) setEmpezando(false);
-    }
-  }, [modo, recordar, cuantas]);
+    },
+    [cuantas],
+  );
+
+  /** "Empezar": lo elegido en la pantalla previa, guardado si se ha marcado. */
+  const empezar = useCallback(
+    () => arrancar(modoEfectivo, recordar),
+    [arrancar, modoEfectivo, recordar],
+  );
+
+  /** "Seguir repasando": otra sesión con lo que quedó fuera, sin guardar nada.
+   * El modo puede no ser el mismo; `modoParaSeguir` explica por qué. */
+  const modoSeguir = modoParaSeguir(modoSesion);
+  const seguir = useCallback(
+    () => arrancar(modoSeguir, false),
+    [arrancar, modoSeguir],
+  );
 
   const revelar = useCallback(() => setRevelada(true), []);
 
@@ -529,10 +652,23 @@ export function SesionRepaso() {
     );
   }
 
+  // El fallo al recordar la elección ocurre cuando la pantalla previa ya se ha
+  // ido, así que enseñarlo solo allí sería no enseñarlo nunca: va también en la
+  // de fin de sesión, que es la siguiente que se ve.
+  const avisoGuardado = avisoAjustes ? (
+    <p
+      role="alert"
+      style={TEXTO_2}
+      className="rounded-control border border-peligro p-4 text-peligro"
+    >
+      {avisoAjustes}
+    </p>
+  ) : null;
+
   // La pantalla previa: sustituye a la de "hoy no toca nada" y al botón de
   // adelantar, que eran casos particulares de elegir qué y cuánto repasar.
   if (estado === "antes" && resumen) {
-    const hoy = resumen.hoy.sinAprender + resumen.hoy.aprendidas;
+    const legible = resumenLegible(resumen);
     const biblioteca = resumen.total.sinAprender + resumen.total.aprendidas;
 
     if (biblioteca === 0) {
@@ -558,12 +694,10 @@ export function SesionRepaso() {
     return (
       <Tarjeta className="flex flex-col gap-4">
         <h1 style={TEXTO_4} className="font-semibold">
-          {hoy === 0 ? "Hoy no toca ninguna palabra" : `Hoy tienes ${hoy} palabras`}
+          {legible.titulo}
         </h1>
         <p style={TEXTO_2} className="text-texto-suave">
-          {hoy === 0
-            ? "Estás al día. Si quieres seguir, pon un número y se adelantan las que vengan después."
-            : `${resumen.hoy.sinAprender} sin aprender · ${resumen.hoy.aprendidas} aprendidas`}
+          {legible.detalle}
         </p>
 
         <fieldset className="flex flex-col gap-2 border-0 p-0">
@@ -574,7 +708,10 @@ export function SesionRepaso() {
             {MODOS.map((opcion) => (
               <Boton
                 key={opcion}
-                variante={opcion === modo ? "primario" : "secundario"}
+                // `modoEfectivo`, no `modo`: si el guardado se quedó sin
+                // material hoy, el marcado es al que se ha caído la elección.
+                // Marcado y desactivado a la vez es una pantalla sin salida.
+                variante={opcion === modoEfectivo ? "primario" : "secundario"}
                 disabled={!puedeEmpezar(resumen, opcion, cuantas)}
                 onClick={() => setModo(opcion)}
               >
@@ -620,12 +757,14 @@ export function SesionRepaso() {
           <span style={TEXTO_2}>Recordar esta elección</span>
         </label>
 
+        {avisoGuardado}
+
         <Boton
           variante="primario"
           // Ya no hay carrera entre el `blur` del campo y este `click`: el
           // número no pasa por el servidor, sale del borrador que se está
           // viendo. Basta con no dejar empezar si ese borrador no vale.
-          disabled={!cuantasVale || !puedeEmpezar(resumen, modo, cuantas) || empezando}
+          disabled={!cuantasVale || !puedeEmpezar(resumen, modoEfectivo, cuantas) || empezando}
           onClick={() => void empezar()}
         >
           {empezando ? "Preparando…" : "Empezar"}
@@ -674,7 +813,7 @@ export function SesionRepaso() {
         <p style={TEXTO_2} className="text-texto-suave">
           No hemos podido pedir las tarjetas de hoy. Revisa tu conexión e inténtalo otra vez.
         </p>
-        <Boton variante="primario" onClick={() => void recargar()}>
+        <Boton variante="primario" onClick={volverAElegir}>
           Reintentar
         </Boton>
       </Tarjeta>
@@ -704,9 +843,14 @@ export function SesionRepaso() {
               ? "Has repasado 1 tarjeta."
               : `Has repasado ${conteo.total} tarjetas.`}
           </p>
-          <p style={TEXTO_2} className="font-medium">
-            Buen trabajo, ya has terminado por hoy.
-          </p>
+          {/* Solo si de verdad no queda nada: con repasos fuera de la sesión,
+              tres bloques más abajo se dice cuántos quedan, y felicitar por
+              haber terminado justo encima de eso es mentir. */}
+          {repasosFuera === 0 ? (
+            <p style={TEXTO_2} className="font-medium">
+              Buen trabajo, ya has terminado por hoy.
+            </p>
+          ) : null}
         </div>
 
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -741,9 +885,13 @@ export function SesionRepaso() {
           </p>
         ) : null}
 
+        {avisoGuardado}
+
         {/* Puede quedar algo fuera por el número pedido, pero también por el
             modo: "no aprendidas" deja fuera todos los repasos vencidos sin que
-            haya ningún límite de por medio. */}
+            haya ningún límite de por medio. Por eso el botón puede tener que
+            cambiar de colección: repetir ese modo daría una cola vacía y el
+            mismo botón, en bucle. */}
         {repasosFuera > 0 ? (
           <div className="flex flex-col gap-3 border-t border-borde pt-4">
             <p style={TEXTO_2} className="text-texto-suave">
@@ -751,13 +899,17 @@ export function SesionRepaso() {
                 ? "Queda 1 repaso más para hoy que no entró en esta sesión."
                 : `Quedan ${repasosFuera} repasos más para hoy que no entraron en esta sesión.`}
             </p>
-            <Boton variante="primario" disabled={empezando} onClick={() => void empezar()}>
-              {empezando ? "Preparando…" : "Seguir repasando"}
+            <Boton variante="primario" disabled={empezando} onClick={() => void seguir()}>
+              {empezando
+                ? "Preparando…"
+                : modoSeguir === modoSesion
+                  ? "Seguir repasando"
+                  : `Seguir con "${ETIQUETA_MODO[modoSeguir]}"`}
             </Boton>
           </div>
         ) : null}
 
-        <Boton variante="secundario" disabled={empezando} onClick={() => void recargar()}>
+        <Boton variante="secundario" disabled={empezando} onClick={volverAElegir}>
           Volver a elegir
         </Boton>
 

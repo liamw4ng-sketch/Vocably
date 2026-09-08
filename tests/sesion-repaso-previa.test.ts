@@ -3,6 +3,9 @@ import {
   disponibles,
   puedeEmpezar,
   validarCuantas,
+  resumenLegible,
+  modoDisponible,
+  modoParaSeguir,
   ETIQUETA_MODO,
 } from "@/components/SesionRepaso";
 import { MODOS, MAXIMO_TAMANO_SESION } from "@/lib/ajustes";
@@ -91,6 +94,118 @@ describe("validarCuantas", () => {
     expect(validarCuantas(String(MAXIMO_TAMANO_SESION + 1))).toEqual({
       error: MENSAJE_RANGO,
     });
+  });
+});
+
+describe("resumenLegible", () => {
+  it("una sola palabra hoy va en singular", () => {
+    // El último repaso del día, todos los días: antes decía "Hoy tienes 1
+    // palabras".
+    expect(resumenLegible(resumen({ sinAprender: 1, aprendidas: 0 })).titulo).toBe(
+      "Hoy tienes 1 palabra",
+    );
+    expect(resumenLegible(resumen({ sinAprender: 0, aprendidas: 1 })).titulo).toBe(
+      "Hoy tienes 1 palabra",
+    );
+  });
+
+  it("de dos en adelante, plural", () => {
+    expect(resumenLegible(resumen({ sinAprender: 5, aprendidas: 18 })).titulo).toBe(
+      "Hoy tienes 23 palabras",
+    );
+  });
+
+  it("el detalle reparte las dos colecciones y también concuerda", () => {
+    expect(resumenLegible(resumen({ sinAprender: 5, aprendidas: 18 })).detalle).toBe(
+      "5 sin aprender · 18 aprendidas",
+    );
+    expect(resumenLegible(resumen({ sinAprender: 1, aprendidas: 1 })).detalle).toBe(
+      "1 sin aprender · 1 aprendida",
+    );
+    expect(resumenLegible(resumen({ sinAprender: 0, aprendidas: 2 })).detalle).toBe(
+      "0 sin aprender · 2 aprendidas",
+    );
+  });
+
+  it("sin nada para hoy no cuenta ceros: cambia de frase", () => {
+    const legible = resumenLegible(
+      resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 9, aprendidas: 4 }),
+    );
+    expect(legible.titulo).toBe("Hoy no toca ninguna palabra");
+    expect(legible.detalle).toContain("pon un número");
+  });
+
+  it("solo mira lo de hoy, no la biblioteca entera", () => {
+    const legible = resumenLegible(
+      resumen({ sinAprender: 1, aprendidas: 0 }, { sinAprender: 100, aprendidas: 200 }),
+    );
+    expect(legible.titulo).toBe("Hoy tienes 1 palabra");
+    expect(legible.detalle).toBe("1 sin aprender · 0 aprendidas");
+  });
+});
+
+describe("modoDisponible", () => {
+  it("respeta el modo elegido mientras tenga material", () => {
+    const r = resumen({ sinAprender: 3, aprendidas: 9 });
+    for (const modo of MODOS) {
+      expect(modoDisponible(r, modo, 0)).toBe(modo);
+    }
+  });
+
+  it("se mueve a uno que sí puede cuando el elegido se queda vacío", () => {
+    // El caso de todos los días: quien guardó "No aprendidas" agota el cupo
+    // diario de nuevas y vuelve a entrar. Antes ese modo salía marcado y
+    // desactivado a la vez, con "Empezar" en gris y sin explicación.
+    const r = resumen({ sinAprender: 0, aprendidas: 18 });
+    expect(modoDisponible(r, "no-aprendidas", 0)).toBe("aprendidas");
+  });
+
+  it("el modo que devuelve siempre se puede empezar, si alguno se puede", () => {
+    const casos = [
+      resumen({ sinAprender: 0, aprendidas: 18 }),
+      resumen({ sinAprender: 4, aprendidas: 0 }),
+      resumen({ sinAprender: 2, aprendidas: 7 }),
+    ];
+    for (const r of casos) {
+      for (const modo of MODOS) {
+        expect(puedeEmpezar(r, modoDisponible(r, modo, 0), 0)).toBe(true);
+      }
+    }
+  });
+
+  it("con la biblioteca vacía se queda con el elegido", () => {
+    // No hay ninguno mejor al que ir, y cambiar de modo por cambiar movería la
+    // elección del usuario sin darle nada a cambio.
+    const r = resumen({ sinAprender: 0, aprendidas: 0 });
+    for (const modo of MODOS) {
+      expect(modoDisponible(r, modo, 0)).toBe(modo);
+    }
+  });
+
+  it("el número también cuenta: lo adelantable puede rescatar un modo", () => {
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 7 });
+    expect(modoDisponible(r, "no-aprendidas", 0)).toBe("no-aprendidas");
+    expect(modoDisponible(r, "no-aprendidas", 5)).toBe("aprendidas");
+  });
+});
+
+describe("modoParaSeguir", () => {
+  it('"no aprendidas" no puede traer los repasos que dejó fuera: se sigue con "aprendidas"', () => {
+    // `repasosFuera` cuenta repasos vencidos fuera de la sesión. En este modo
+    // los deja fuera el modo mismo, no ningún límite: repetirlo daría una cola
+    // vacía una y otra vez.
+    expect(modoParaSeguir("no-aprendidas")).toBe("aprendidas");
+  });
+
+  it("los otros dos modos sí los traen: se sigue con el mismo", () => {
+    expect(modoParaSeguir("aprendidas")).toBe("aprendidas");
+    expect(modoParaSeguir("mezcla")).toBe("mezcla");
+  });
+
+  it("nunca devuelve el modo que no puede traer repasos vencidos", () => {
+    for (const modo of MODOS) {
+      expect(modoParaSeguir(modo)).not.toBe("no-aprendidas");
+    }
   });
 });
 
