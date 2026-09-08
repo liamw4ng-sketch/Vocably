@@ -63,9 +63,10 @@ aparte.
   **0 significa "las que toquen hoy"**, así que por defecto la app no recorta
   nada por su cuenta.
 - **`sessionMode`** (`mezcla` por defecto): de cuál colección salen las
-  palabras. Los valores válidos son `no-aprendidas` (solo nuevas),
-  `aprendidas` (solo ya aprendidas que venzan) o `mezcla` (nuevas y
-  aprendidas vencidas, mezcladas).
+  palabras. Los valores válidos son `no-aprendidas` (en curso y nuevas),
+  `aprendidas` (ya aprendidas que venzan; si el tamaño de sesión no se llena
+  con esas, adelanta las que aún no vencían) o `mezcla` (nuevas y aprendidas
+  vencidas, mezcladas).
 
 Cuando vencen más palabras aprendidas de las que caben en la sesión, se
 **sortean**: cuáles entran se decide al azar, no por antigüedad ni por id, de
