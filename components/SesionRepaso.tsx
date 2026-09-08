@@ -2,14 +2,23 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { CartaCola, Cola } from "@/db/repository/review";
-import { TOPE_MAXIMO_TARJETAS_NUEVAS, MAXIMO_TAMANO_SESION } from "@/lib/ajustes";
+import type { CartaCola, Cola, ResumenColecciones } from "@/db/repository/review";
+import {
+  MODOS,
+  MODO_POR_DEFECTO,
+  TOPE_MAXIMO_TARJETAS_NUEVAS,
+  MAXIMO_TAMANO_SESION,
+  esModo,
+  type Modo,
+} from "@/lib/ajustes";
 import { crearSesion, type EnvioRespuesta, type Sesion, type Valoracion } from "@/lib/review-session";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
 import { Tarjeta } from "@/components/ui/Tarjeta";
 
-type Estado = "cargando" | "error" | "lista";
+/** "antes" es la pantalla previa: se elige qué y cuánto repasar y solo
+ * entonces se pide la cola. */
+type Estado = "cargando" | "error" | "antes" | "lista";
 
 type BotonValoracion = {
   valor: Valoracion;
@@ -42,9 +51,16 @@ const TEXTO_4 = { fontSize: "var(--tamano-4)" };
 const TEXTO_5 = { fontSize: "var(--tamano-5)" };
 const TEXTO_6 = { fontSize: "var(--tamano-6)" };
 
-/** Pide la cola del día. Sin estado de React dentro: solo red. */
-async function pedirCola(adelantar: boolean): Promise<Cola> {
-  const respuesta = await fetch(`/api/repaso/cola${adelantar ? "?adelantar=1" : ""}`);
+/** Los contadores de la pantalla previa. No construye la cola. */
+async function pedirResumen(): Promise<ResumenColecciones> {
+  const respuesta = await fetch("/api/repaso/resumen");
+  if (!respuesta.ok) throw new Error(`respuesta ${respuesta.status}`);
+  return (await respuesta.json()) as ResumenColecciones;
+}
+
+/** Pide la cola ya elegida. Sin estado de React dentro: solo red. */
+async function pedirCola(modo: Modo, cuantas: number): Promise<Cola> {
+  const respuesta = await fetch(`/api/repaso/cola?modo=${modo}&cuantas=${cuantas}`);
   if (!respuesta.ok) throw new Error(`respuesta ${respuesta.status}`);
   return (await respuesta.json()) as Cola;
 }
@@ -60,9 +76,9 @@ async function enviarRespuesta(envio: EnvioRespuesta): Promise<unknown> {
   return respuesta.json();
 }
 
-/** Los dos ajustes editables desde esta pantalla. */
+/** Los dos ajustes numéricos, los únicos que pasan por `useAjusteNumerico`. */
 export type CampoAjuste = "newCardsPerDay" | "sessionSize";
-type Ajustes = Record<CampoAjuste, number>;
+type Ajustes = Record<CampoAjuste, number> & { sessionMode: Modo };
 
 async function pedirAjustes(): Promise<Ajustes> {
   const respuesta = await fetch("/api/ajustes");
@@ -95,6 +111,24 @@ export async function guardarAjuste(
     return { error: cuerpo?.error ?? "No se pudo guardar el cambio." };
   }
   return { valor: cuerpo?.[campo] ?? valor };
+}
+
+/**
+ * Guardar el modo es igual que guardar un número, pero el valor no es numérico
+ * y `guardarAjuste` valida y revierte pensando en enteros.
+ */
+async function guardarModo(modo: Modo): Promise<{ error: string } | null> {
+  try {
+    const respuesta = await fetch("/api/ajustes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionMode: modo }),
+    });
+    if (!respuesta.ok) return { error: "No se pudo guardar el modo." };
+  } catch {
+    return { error: "No se pudo conectar con el servidor." };
+  }
+  return null;
 }
 
 /**
@@ -203,6 +237,37 @@ export function mostrarContexto(context: string, senseHint: string): boolean {
   return frase !== senseHint.trim();
 }
 
+export const ETIQUETA_MODO: Record<Modo, string> = {
+  "no-aprendidas": "No aprendidas",
+  aprendidas: "Aprendidas",
+  mezcla: "Mezcla",
+};
+
+/**
+ * Cuántas tarjetas hay para un modo. Con el número a 0 solo cuenta lo vencido,
+ * porque eso es lo único que entraría; con un número explícito cuenta también
+ * lo adelantable, que es de donde saldría el resto.
+ */
+export function disponibles(
+  resumen: ResumenColecciones,
+  modo: Modo,
+  cuantas: number,
+): number {
+  const lado = cuantas === 0 ? resumen.hoy : resumen.total;
+  if (modo === "no-aprendidas") return lado.sinAprender;
+  if (modo === "aprendidas") return lado.aprendidas;
+  return lado.sinAprender + lado.aprendidas;
+}
+
+/** Un modo vacío tiene que salir desactivado, no fallar al pulsarlo. */
+export function puedeEmpezar(
+  resumen: ResumenColecciones,
+  modo: Modo,
+  cuantas: number,
+): boolean {
+  return disponibles(resumen, modo, cuantas) > 0;
+}
+
 function Frase({
   frase,
   termino,
@@ -250,17 +315,19 @@ export function SesionRepaso() {
   const [sesion, setSesion] = useState<Sesion | null>(null);
   const [revelada, setRevelada] = useState(false);
   const [guardando, setGuardando] = useState(false);
-  const [adelantado, setAdelantado] = useState(false);
   // `Sesion` es un objeto mutable sin React dentro: hay que pedir el redibujo.
-  // `version` se expone (antes se descartaba) para poder usarlo como
-  // dependencia del efecto de carga del tope, más abajo: es la señal de "algo
-  // relevante ha cambiado" que ese efecto necesita para volver a comprobar si
-  // la sesión ya terminó.
-  const [version, redibujar] = useReducer((n: number) => n + 1, 0);
+  const [, redibujar] = useReducer((n: number) => n + 1, 0);
 
-  // Repasos que el límite por sesión dejó fuera. Se lee al pedir la cola y se
-  // enseña al terminar: sin esto, un límite por debajo del ritmo diario
-  // acumula atrasos sin que nada lo diga.
+  // Lo elegido en la pantalla previa. El modo llega de los ajustes guardados y
+  // el número, de `tamanoSesion`, más abajo.
+  const [resumen, setResumen] = useState<ResumenColecciones | null>(null);
+  const [modo, setModo] = useState<Modo>(MODO_POR_DEFECTO);
+  const [recordar, setRecordar] = useState(false);
+  const [empezando, setEmpezando] = useState(false);
+
+  // Repasos vencidos hoy que esta sesión dejó fuera, sea por el número pedido o
+  // por el modo. Se lee al pedir la cola y se enseña al terminar: sin esto, una
+  // sesión por debajo del ritmo diario acumula atrasos sin que nada lo diga.
   const [repasosFuera, setRepasosFuera] = useState(0);
 
   // Se lee dentro de callbacks async (valorar) para no tocar estado tras
@@ -274,33 +341,31 @@ export function SesionRepaso() {
     };
   }, []);
 
-  // Los dos ajustes, mostrados en las pantallas en las que no hay una sesión
-  // en marcha: la de fin de sesión y la de "hoy no toca nada". `valor === null`
-  // significa "aún no se ha pedido al servidor, o la petición falló" — cuál de
-  // las dos es `ajustesCargaFallo`, más abajo.
+  // Los dos ajustes numéricos, editables desde la pantalla previa. Ya no hacen
+  // falta ni un `ajustesCargaFallo` ni un ref de "ya lo he pedido": los ajustes
+  // llegan en la carga inicial, y si esa falla, falla la pantalla entera y hay
+  // un botón para reintentarla.
   const topeNuevas = useAjusteNumerico("newCardsPerDay", TOPE_MAXIMO_TARJETAS_NUEVAS, montadoRef);
-  const repasosSesion = useAjusteNumerico("sessionSize", MAXIMO_TAMANO_SESION, montadoRef);
-  const [ajustesCargaFallo, setAjustesCargaFallo] = useState(false);
-  // Si el GET fallara, los valores seguirían siendo `null` para siempre y nada
-  // distinguiría "aún no pedido" de "pedido y fallido" — el efecto de abajo
-  // volvería a intentarlo en cada render. Este ref es la señal real de
-  // "ya lo hemos intentado", independiente del resultado.
-  const ajustesSolicitadosRef = useRef(false);
+  const tamanoSesion = useAjusteNumerico("sessionSize", MAXIMO_TAMANO_SESION, montadoRef);
 
   // Carga inicial: función async dentro del efecto con su guard, igual que en
-  // TermTable, para no encadenar renders desde el cuerpo del efecto.
+  // TermTable, para no encadenar renders desde el cuerpo del efecto. No pide la
+  // cola: qué cola pedir se decide en la pantalla previa.
   useEffect(() => {
     let cancelado = false;
 
     async function cargarInicial() {
       try {
-        const cola = await pedirCola(false);
-        if (!cancelado) {
-          setCartas(cola.cartas);
-          setRepasosFuera(cola.repasosFuera);
-          setSesion(crearSesion(cola.cartas, { enviar: enviarRespuesta }));
-          setEstado("lista");
-        }
+        const [datos, ajustes] = await Promise.all([pedirResumen(), pedirAjustes()]);
+        if (cancelado) return;
+        setResumen(datos);
+        // El servidor ya devuelve un modo válido, pero lo que llega por la red
+        // es JSON sin comprobar: un valor viejo dejaría los tres botones sin
+        // marcar y no habría manera de saber qué se iba a repasar.
+        setModo(esModo(ajustes.sessionMode) ? ajustes.sessionMode : MODO_POR_DEFECTO);
+        topeNuevas.fijar(ajustes.newCardsPerDay);
+        tamanoSesion.fijar(ajustes.sessionSize);
+        setEstado("antes");
       } catch {
         if (!cancelado) setEstado("error");
       }
@@ -310,69 +375,70 @@ export function SesionRepaso() {
     return () => {
       cancelado = true;
     };
+    // `fijar` es estable (useCallback sin dependencias) y esto se hace una sola
+    // vez, al montar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // `sesion` no cambia de referencia durante toda la sesión (es un objeto
-  // mutable), así que la única señal de "puede que la sesión acabe de
-  // terminar" es `version`: se incrementa en cada `redibujar()`, que
-  // `valorar` llama después de responder cada tarjeta, incluida la última.
-  // El guard real de "no lo pidas dos veces" es `topeSolicitadoRef`, no el
-  // resultado de la petición: así, si el GET falla, no se reintenta en cada
-  // render (incluidos los que no tienen nada que ver, como el de la barra
-  // espaciadora) — se intenta una vez y, si falla, se informa con
-  // `topeCargaFallo` en vez de martillear el servidor.
-  //
-  // La condición es "no hay tarjeta en curso", que cubre los dos finales: la
-  // sesión terminada y la cola que llegó vacía. Antes se descartaba
-  // explícitamente `total === 0`, y con el tope a 0 eso encerraba al usuario:
-  // la cola se vaciaba, la única pantalla con el control era la de fin de
-  // sesión —a la que ya no se podía llegar— y no hay pantalla de ajustes.
-  useEffect(() => {
-    if (!sesion || ajustesSolicitadosRef.current) return;
-    if (sesion.cartaActual()) return;
-
-    ajustesSolicitadosRef.current = true;
-    // El guard es `montadoRef`, no un `cancelado` local con función de
-    // limpieza. Este efecto depende de `version`, que se incrementa otra vez
-    // en cuanto `pendientes()` termina de guardar las últimas respuestas: una
-    // limpieza por render cancelaba la petición en vuelo, y como el ref ya
-    // estaba puesto, la nueva pasada no volvía a pedirla. El control de
-    // ajustes desaparecía del final de sesión —sin control y sin mensaje de
-    // error— siempre que los ajustes tardaran más que el último guardado.
-    // Ganaba quien llegara antes, así que fallaba de forma intermitente.
-    pedirAjustes()
-      .then((ajustes) => {
-        if (montadoRef.current) {
-          topeNuevas.fijar(ajustes.newCardsPerDay);
-          repasosSesion.fijar(ajustes.sessionSize);
-        }
-      })
-      .catch(() => {
-        // No bloqueamos el cierre de la sesión, pero sí lo decimos: sin esto
-        // el control simplemente no aparecía y nada explicaba por qué.
-        if (montadoRef.current) setAjustesCargaFallo(true);
-      });
-    // `fijar` es estable (useCallback sin dependencias); lo que dispara este
-    // efecto es que la sesión llegue a su final, que es lo que señala `version`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sesion, version]);
-
-  /** Reintentar tras un error, o adelantar palabras nuevas: siempre desde un evento. */
-  const recargar = useCallback(async (adelantar: boolean) => {
+  /**
+   * Vuelve a la pantalla previa con los contadores al día. Sirve para las dos
+   * cosas que llevan al mismo sitio: reintentar cuando la carga falló —el
+   * error ocurre antes de que exista ninguna cola, así que lo que hay que
+   * volver a pedir es el resumen— y volver a elegir al terminar una sesión.
+   */
+  const recargar = useCallback(async () => {
+    setSesion(null);
     setEstado("cargando");
     try {
-      const cola = await pedirCola(adelantar);
+      const datos = await pedirResumen();
+      if (!montadoRef.current) return;
+      setResumen(datos);
+      setEstado("antes");
+    } catch {
+      if (montadoRef.current) setEstado("error");
+    }
+  }, []);
+
+  /**
+   * Los contadores otra vez, sin vaciar la pantalla: se usa al cambiar el tope
+   * diario, que es de lo que depende cuántas palabras nuevas entran hoy. Si
+   * falla se quedan los de antes; no vale la pena tirar abajo la pantalla
+   * entera por un recuento.
+   */
+  const refrescarResumen = useCallback(async () => {
+    try {
+      const datos = await pedirResumen();
+      if (montadoRef.current) setResumen(datos);
+    } catch {
+      // Los contadores anteriores siguen en pantalla.
+    }
+  }, []);
+
+  /** Arranca la sesión con lo elegido: aquí, y solo aquí, se pide la cola. */
+  const empezar = useCallback(async () => {
+    const cuantas = tamanoSesion.valor ?? 0;
+    setEmpezando(true);
+    try {
+      // Se guarda ANTES de pedir la cola: si la cola falla, la preferencia ya
+      // quedó guardada, que es lo que el usuario pidió al marcar la casilla.
+      if (recordar) {
+        await guardarAjuste("sessionSize", cuantas);
+        await guardarModo(modo);
+      }
+      const cola = await pedirCola(modo, cuantas);
+      if (!montadoRef.current) return;
       setCartas(cola.cartas);
       setRepasosFuera(cola.repasosFuera);
       setSesion(crearSesion(cola.cartas, { enviar: enviarRespuesta }));
       setRevelada(false);
       setGuardando(false);
-      setAdelantado(adelantar);
       setEstado("lista");
     } catch {
-      setEstado("error");
+      if (montadoRef.current) setEstado("error");
+    } finally {
+      if (montadoRef.current) setEmpezando(false);
     }
-  }, []);
+  }, [modo, recordar, tamanoSesion.valor]);
 
   const revelar = useCallback(() => setRevelada(true), []);
 
@@ -429,6 +495,138 @@ export function SesionRepaso() {
     );
   }
 
+  // La pantalla previa: sustituye a la de "hoy no toca nada" y al botón de
+  // adelantar, que eran casos particulares de elegir qué y cuánto repasar.
+  if (estado === "antes" && resumen) {
+    const cuantas = tamanoSesion.valor ?? 0;
+    const hoy = resumen.hoy.sinAprender + resumen.hoy.aprendidas;
+    const biblioteca = resumen.total.sinAprender + resumen.total.aprendidas;
+
+    if (biblioteca === 0) {
+      return (
+        <Tarjeta className="flex flex-col gap-4">
+          <h1 style={TEXTO_4} className="font-semibold">
+            No tienes ninguna palabra todavía
+          </h1>
+          <p style={TEXTO_2} className="text-texto-suave">
+            Añade vocabulario extrayéndolo de un PDF o buscándolo en el diccionario, y
+            vuelve a esta pantalla.
+          </p>
+          <Boton variante="primario" onClick={() => router.push("/extraer")}>
+            Extraer de un PDF
+          </Boton>
+          <Boton variante="secundario" onClick={() => router.push("/diccionario")}>
+            Buscar en el diccionario
+          </Boton>
+        </Tarjeta>
+      );
+    }
+
+    return (
+      <Tarjeta className="flex flex-col gap-4">
+        <h1 style={TEXTO_4} className="font-semibold">
+          {hoy === 0 ? "Hoy no toca ninguna palabra" : `Hoy tienes ${hoy} palabras`}
+        </h1>
+        <p style={TEXTO_2} className="text-texto-suave">
+          {hoy === 0
+            ? "Estás al día. Si quieres seguir, pon un número y se adelantan las que vengan después."
+            : `${resumen.hoy.sinAprender} sin aprender · ${resumen.hoy.aprendidas} aprendidas`}
+        </p>
+
+        <fieldset className="flex flex-col gap-2 border-0 p-0">
+          <legend style={TEXTO_1} className="text-texto-suave">
+            Repasar
+          </legend>
+          <div className="flex flex-wrap gap-2">
+            {MODOS.map((opcion) => (
+              <Boton
+                key={opcion}
+                variante={opcion === modo ? "primario" : "secundario"}
+                disabled={!puedeEmpezar(resumen, opcion, cuantas)}
+                onClick={() => setModo(opcion)}
+              >
+                {ETIQUETA_MODO[opcion]} ({disponibles(resumen, opcion, cuantas)})
+              </Boton>
+            ))}
+          </div>
+        </fieldset>
+
+        <Campo
+          id="tamano-sesion"
+          etiqueta="Cuántas"
+          claseControl="max-w-40"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={MAXIMO_TAMANO_SESION}
+          value={tamanoSesion.borrador}
+          disabled={tamanoSesion.guardando}
+          onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
+            tamanoSesion.setBorrador(evento.target.value)
+          }
+          onBlur={() => void tamanoSesion.confirmar()}
+          error={tamanoSesion.error}
+          ayuda={
+            tamanoSesion.error
+              ? undefined
+              : "0 = las que toquen hoy. Cualquier otro número es exactamente ese, adelantando las que aún no tocaban."
+          }
+        />
+
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={recordar}
+            onChange={(evento) => setRecordar(evento.target.checked)}
+          />
+          <span style={TEXTO_2}>Recordar esta elección</span>
+        </label>
+
+        <Boton
+          variante="primario"
+          // También mientras el número se está guardando: al pulsar el botón
+          // primero se sale del campo, y sin esta condición la sesión se
+          // pediría con el valor anterior, el que todavía tiene `valor`.
+          disabled={!puedeEmpezar(resumen, modo, cuantas) || empezando || tamanoSesion.guardando}
+          onClick={() => void empezar()}
+        >
+          {empezando ? "Preparando…" : "Empezar"}
+        </Boton>
+        <Boton variante="secundario" onClick={() => router.push("/biblioteca")}>
+          Volver a la biblioteca
+        </Boton>
+
+        {/* El tope diario no es una elección de esta sesión: se guarda al salir
+            del campo, como antes, y es el único sitio de la app desde el que se
+            puede cambiar. Los contadores de arriba dependen de él, así que se
+            vuelven a pedir en cuanto se toca. */}
+        <div className="border-t border-borde pt-4">
+          <Campo
+            id="tope-tarjetas-nuevas"
+            etiqueta="Tarjetas nuevas al día"
+            claseControl="max-w-40"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={TOPE_MAXIMO_TARJETAS_NUEVAS}
+            value={topeNuevas.borrador}
+            disabled={topeNuevas.guardando}
+            onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
+              topeNuevas.setBorrador(evento.target.value)
+            }
+            onBlur={() => void topeNuevas.confirmar().then(refrescarResumen)}
+            error={topeNuevas.error}
+            ayuda={
+              topeNuevas.error
+                ? undefined
+                : "Cuántas palabras nuevas quieres ver cada día. Se guarda para las próximas sesiones."
+            }
+          />
+        </div>
+      </Tarjeta>
+    );
+  }
+
   if (estado === "error" || !sesion) {
     return (
       <Tarjeta className="flex flex-col gap-4">
@@ -438,7 +636,7 @@ export function SesionRepaso() {
         <p style={TEXTO_2} className="text-texto-suave">
           No hemos podido pedir las tarjetas de hoy. Revisa tu conexión e inténtalo otra vez.
         </p>
-        <Boton variante="primario" onClick={() => void recargar(false)}>
+        <Boton variante="primario" onClick={() => void recargar()}>
           Reintentar
         </Boton>
       </Tarjeta>
@@ -448,94 +646,10 @@ export function SesionRepaso() {
   const { hechas, total } = sesion.progreso();
   const carta = sesion.cartaActual();
 
-  // Un solo control para las dos pantallas de final (sesión terminada y cola
-  // vacía): misma validación, mismo aviso de guardado, misma recuperación si
-  // el servidor rechaza el valor. Dos copias del control acabarían divergiendo.
-  const controlAjustes =
-    topeNuevas.valor !== null ? (
-      <div className="flex flex-col gap-4 border-t border-borde pt-4">
-        <Campo
-          id="tope-tarjetas-nuevas"
-          etiqueta="Tarjetas nuevas al día"
-          claseControl="max-w-40"
-          type="number"
-          inputMode="numeric"
-          min={0}
-          max={TOPE_MAXIMO_TARJETAS_NUEVAS}
-          value={topeNuevas.borrador}
-          disabled={topeNuevas.guardando}
-          onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
-            topeNuevas.setBorrador(evento.target.value)
-          }
-          onBlur={() => void topeNuevas.confirmar()}
-          error={topeNuevas.error}
-          ayuda={
-            topeNuevas.error
-              ? undefined
-              : "Cuántas palabras nuevas quieres ver cada día. Se guarda para las próximas sesiones."
-          }
-        />
-        <Campo
-          id="repasos-por-sesion"
-          etiqueta="Repasos por sesión"
-          claseControl="max-w-40"
-          type="number"
-          inputMode="numeric"
-          min={0}
-          max={MAXIMO_TAMANO_SESION}
-          value={repasosSesion.borrador}
-          disabled={repasosSesion.guardando}
-          onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
-            repasosSesion.setBorrador(evento.target.value)
-          }
-          onBlur={() => void repasosSesion.confirmar()}
-          error={repasosSesion.error}
-          ayuda={
-            repasosSesion.error
-              ? undefined
-              : "Cuántas palabras ya aprendidas entran en cada sesión, elegidas al azar entre las que toquen. 0 = todas."
-          }
-        />
-      </div>
-    ) : ajustesCargaFallo ? (
-      <p style={TEXTO_1} className="border-t border-borde pt-4 text-texto-suave">
-        No se han podido cargar los ajustes del repaso. Actualiza la página para intentarlo
-        de nuevo.
-      </p>
-    ) : null;
-
-  if (total === 0) {
-    // Con el tope a 0 no entra ninguna palabra nueva, así que adelantar
-    // tampoco daría ninguna: en vez de ofrecer un botón que no puede hacer
-    // nada, se dice por qué y se deja el control del tope justo debajo.
-    const topeEnCero = topeNuevas.valor === 0;
-    return (
-      <Tarjeta className="flex flex-col gap-4">
-        <h1 style={TEXTO_4} className="font-semibold">
-          Hoy no toca ninguna tarjeta
-        </h1>
-        <p style={TEXTO_2} className="text-texto-suave">
-          {topeEnCero
-            ? "Tienes el tope de tarjetas nuevas en 0, así que hoy no entra ninguna palabra nueva. Súbelo aquí abajo cuando quieras volver a aprender vocabulario nuevo."
-            : adelantado
-              ? "Tampoco quedan palabras nuevas en la biblioteca. Añade más desde la pantalla de extraer."
-              : "Estás al día. Si quieres seguir, puedes adelantar palabras nuevas de la biblioteca."}
-        </p>
-        {adelantado || topeEnCero ? null : (
-          <Boton variante="primario" onClick={() => void recargar(true)}>
-            Adelantar palabras nuevas
-          </Boton>
-        )}
-        {controlAjustes}
-        <Boton variante="secundario" onClick={() => router.push("/biblioteca")}>
-          Volver a la biblioteca
-        </Boton>
-      </Tarjeta>
-    );
-  }
-
   if (!carta) {
-    const resumen = sesion.resumen();
+    // `conteo`, no `resumen`: ese nombre ya es el de los contadores de la
+    // pantalla previa, y aquí se cuentan las respuestas de la sesión.
+    const conteo = sesion.resumen();
     const perdidas = sesion.fallidas();
     const terminosPerdidos = perdidas
       .map((termId) => cartas.find((c) => c.termId === termId)?.term ?? `#${termId}`)
@@ -548,9 +662,9 @@ export function SesionRepaso() {
             Repaso terminado
           </h1>
           <p style={TEXTO_2} className="text-texto-suave">
-            {resumen.total === 1
+            {conteo.total === 1
               ? "Has repasado 1 tarjeta."
-              : `Has repasado ${resumen.total} tarjetas.`}
+              : `Has repasado ${conteo.total} tarjetas.`}
           </p>
           <p style={TEXTO_2} className="font-medium">
             Buen trabajo, ya has terminado por hoy.
@@ -563,7 +677,7 @@ export function SesionRepaso() {
               <span className={`inline-block size-3 shrink-0 rounded-full ${boton.clase}`} />
               <span style={TEXTO_1}>{boton.etiqueta}</span>
               <span style={TEXTO_1} className="ml-auto font-semibold tabular-nums">
-                {resumen[boton.campo]}
+                {conteo[boton.campo]}
               </span>
             </li>
           ))}
@@ -575,34 +689,39 @@ export function SesionRepaso() {
           </p>
         ) : null}
 
-        {!guardando && resumen.noGuardadas > 0 ? (
+        {!guardando && conteo.noGuardadas > 0 ? (
           <p
             role="alert"
             style={TEXTO_2}
             className="rounded-control border border-peligro p-4 text-peligro"
           >
-            {resumen.noGuardadas === 1
+            {conteo.noGuardadas === 1
               ? "1 respuesta no se guardó"
-              : `${resumen.noGuardadas} respuestas no se guardaron`}
+              : `${conteo.noGuardadas} respuestas no se guardaron`}
             , revisa tu conexión: {terminosPerdidos}. Esas tarjetas volverán a aparecer en el
             próximo repaso.
           </p>
         ) : null}
 
+        {/* Puede quedar algo fuera por el número pedido, pero también por el
+            modo: "no aprendidas" deja fuera todos los repasos vencidos sin que
+            haya ningún límite de por medio. */}
         {repasosFuera > 0 ? (
           <div className="flex flex-col gap-3 border-t border-borde pt-4">
             <p style={TEXTO_2} className="text-texto-suave">
               {repasosFuera === 1
-                ? "Queda 1 repaso más para hoy, fuera del límite de esta sesión."
-                : `Quedan ${repasosFuera} repasos más para hoy, fuera del límite de esta sesión.`}
+                ? "Queda 1 repaso más para hoy que no entró en esta sesión."
+                : `Quedan ${repasosFuera} repasos más para hoy que no entraron en esta sesión.`}
             </p>
-            <Boton variante="primario" onClick={() => void recargar(false)}>
-              Seguir repasando
+            <Boton variante="primario" disabled={empezando} onClick={() => void empezar()}>
+              {empezando ? "Preparando…" : "Seguir repasando"}
             </Boton>
           </div>
         ) : null}
 
-        {controlAjustes}
+        <Boton variante="secundario" disabled={empezando} onClick={() => void recargar()}>
+          Volver a elegir
+        </Boton>
 
         <Boton
           variante={repasosFuera > 0 ? "secundario" : "primario"}

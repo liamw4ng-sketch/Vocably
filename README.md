@@ -421,9 +421,9 @@ verifique todo lo siguiente:
       vuelvan a salir y las valoradas como "Fácil" no.
 - [ ] Que el diseño resulte cómodo de usar tras varias sesiones, no solo
       bonito la primera vez.
-- [ ] Poner "Repasos por sesión" en un número bajo (3, por ejemplo) y
-      comprobar que la sesión trae ese número, que el aviso de lo que quedó
-      fuera cuadra, y que "Seguir repasando" trae palabras distintas.
+- [ ] Poner "Cuántas", en la pantalla previa, en un número bajo (3, por
+      ejemplo) y comprobar que la sesión trae ese número, que el aviso de lo
+      que quedó fuera cuadra, y que "Seguir repasando" trae palabras distintas.
 - [ ] Volver a ponerlo en 0 y comprobar que vuelven a entrar todas.
 
 ## Estado actual y limitaciones conocidas
@@ -431,12 +431,14 @@ verifique todo lo siguiente:
 - **Fase 1:** extracción desde PDF y biblioteca editable. Código completo y
   probado.
 - **Fase 2 (repaso con repetición espaciada):** construida. Pantalla
-  `/repaso`, algoritmo FSRS, los dos ajustes de la tabla `settings` (tope
-  diario de palabras nuevas y límite de repasos por sesión con sorteo),
-  manifiesto para instalar la app en el móvil con `start_url` en `/repaso`. No
-  consume la API de Claude en ningún momento (ver "Coste"). Pendiente solo la
-  prueba de aceptación de más arriba, que hace el usuario en su móvil.
-- La suite completa suma **304 pruebas**, ninguna contra la API de Claude ni
+  `/repaso` con su pantalla previa —qué colección y cuántas palabras, antes de
+  ver la primera tarjeta—, algoritmo FSRS, los tres ajustes de la tabla
+  `settings` (tope diario de palabras nuevas, tamaño de sesión y colección que
+  se repasa), manifiesto para instalar la app en el móvil con `start_url` en
+  `/repaso`. No consume la API de Claude en ningún momento (ver "Coste").
+  Pendiente solo la prueba de aceptación de más arriba, que hace el usuario en
+  su móvil.
+- La suite completa suma **371 pruebas**, ninguna contra la API de Claude ni
   contra MyMemory ni contra una base de datos real.
 - **No hay pruebas de componentes.** Vitest corre con `environment: "node"`,
   sin jsdom ni Testing Library, así que ninguna prueba puede pulsar un botón

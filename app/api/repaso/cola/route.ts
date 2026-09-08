@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   }
 
   // Se devuelve la cola entera: `cartas` y `repasosFuera`, que la pantalla
-  // necesita para decir cuántos repasos quedaron fuera del límite.
+  // necesita para decir cuántos repasos quedaron fuera de la sesión.
   const cola = await getDueQueue(getDb(), {
     now: new Date(),
     source: url.searchParams.get("source") ?? undefined,
