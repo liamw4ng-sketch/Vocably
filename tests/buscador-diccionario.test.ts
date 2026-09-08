@@ -191,3 +191,48 @@ describe("botonAnadirDeshabilitado", () => {
     expect(botonAnadirDeshabilitado("B1", 1, false)).toBe(false);
   });
 });
+
+/**
+ * Cuando el servidor falla de verdad —una tabla que no existe, por ejemplo—
+ * Next devuelve un 500 cuyo cuerpo no es JSON. Antes, `res.json()` reventaba y
+ * la pantalla enseñaba el mensaje interno del navegador: en Safari,
+ * "The string did not match the expected pattern.", que no le dice nada a nadie.
+ */
+describe("cuando el servidor responde algo que no es JSON", () => {
+  function fetchQueDevuelveHtml(status: number) {
+    return vi.fn<typeof fetch>(
+      async () =>
+        new Response("<!DOCTYPE html><html><body>Internal Server Error</body></html>", {
+          status,
+          headers: { "Content-Type": "text/html" },
+        }),
+    );
+  }
+
+  it("buscarTermino da un mensaje legible, no el del navegador", async () => {
+    await expect(
+      buscarTermino("bank", fetchQueDevuelveHtml(500)),
+    ).rejects.toThrow(/servidor/i);
+  });
+
+  it("el mensaje de buscarTermino nombra el código, para poder decir qué pasó", async () => {
+    await expect(
+      buscarTermino("bank", fetchQueDevuelveHtml(500)),
+    ).rejects.toThrow(/500/);
+  });
+
+  it("anadirAcepcion tampoco escupe el mensaje del navegador", async () => {
+    await expect(
+      anadirAcepcion(acepcion, "B1", fetchQueDevuelveHtml(500)),
+    ).rejects.toThrow(/servidor/i);
+  });
+
+  it("afinarConIA tampoco", async () => {
+    await expect(afinarConIA(1, fetchQueDevuelveHtml(500))).rejects.toThrow(/servidor/i);
+  });
+
+  it("una respuesta correcta pero con cuerpo vacío no revienta", async () => {
+    const fetchVacio = vi.fn<typeof fetch>(async () => new Response("", { status: 200 }));
+    await expect(buscarTermino("bank", fetchVacio)).rejects.toThrow(/servidor/i);
+  });
+});

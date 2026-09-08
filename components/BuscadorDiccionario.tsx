@@ -38,6 +38,31 @@ type Resultado = {
 };
 
 /**
+ * Lee el cuerpo de una respuesta sin dar por hecho que es JSON.
+ *
+ * Cuando el servidor falla de verdad —una tabla que no existe, por ejemplo—
+ * Next devuelve un 500 cuyo cuerpo es HTML. Si se llama a `res.json()` a pelo,
+ * revienta con el mensaje interno del navegador, que en Safari es "The string
+ * did not match the expected pattern.": el usuario ve eso y no puede hacer nada
+ * con ello. Devolver `null` deja que cada llamada dé un mensaje suyo.
+ */
+async function leerCuerpo(res: Response): Promise<{ error?: string } | null> {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** Qué decirle al usuario cuando el servidor contestó algo ilegible. */
+function fallaDelServidor(res: Response, accion: string): Error {
+  return new Error(
+    `El servidor no pudo ${accion} (error ${res.status}). ` +
+      "Si acabas de instalar el diccionario, comprueba que las migraciones están aplicadas.",
+  );
+}
+
+/**
  * Extraídas del componente y exportadas a propósito: este proyecto prueba en
  * `environment: "node"`, sin jsdom, así que la lógica que puede fallar —la
  * petición, el error del servidor, la validación del nivel— vive en funciones
@@ -55,9 +80,10 @@ export async function buscarTermino(
     // siempre, sin decirle nada al usuario.
     throw new Error("No se pudo buscar: comprueba la conexión.");
   }
-  const cuerpo = await res.json();
-  if (!res.ok) throw new Error(cuerpo.error ?? "No se pudo buscar.");
-  return cuerpo as Resultado;
+  const cuerpo = await leerCuerpo(res);
+  if (!res.ok) throw new Error(cuerpo?.error ?? fallaDelServidor(res, "buscar").message);
+  if (!cuerpo) throw fallaDelServidor(res, "buscar");
+  return cuerpo as unknown as Resultado;
 }
 
 export async function anadirAcepcion(
@@ -86,7 +112,10 @@ export async function anadirAcepcion(
   } catch {
     throw new Error("No se pudo añadir: comprueba la conexión.");
   }
-  if (!res.ok) throw new Error((await res.json()).error ?? "No se pudo añadir.");
+  if (!res.ok) {
+    const cuerpo = await leerCuerpo(res);
+    throw new Error(cuerpo?.error ?? fallaDelServidor(res, "añadir la palabra").message);
+  }
 }
 
 /**
@@ -166,9 +195,10 @@ export async function afinarConIA(
   } catch {
     throw new Error("No se pudo afinar: comprueba la conexión.");
   }
-  const cuerpo = await res.json();
-  if (!res.ok) throw new Error(cuerpo.error ?? "No se pudo afinar.");
-  return cuerpo.translations as string[];
+  const cuerpo = await leerCuerpo(res);
+  if (!res.ok) throw new Error(cuerpo?.error ?? fallaDelServidor(res, "afinar").message);
+  if (!cuerpo) throw fallaDelServidor(res, "afinar");
+  return (cuerpo as { translations: string[] }).translations;
 }
 
 export function BuscadorDiccionario() {

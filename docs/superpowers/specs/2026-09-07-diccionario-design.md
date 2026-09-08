@@ -279,10 +279,9 @@ Del 1 al 4 la pantalla ya sirve. Del 5 en adelante es mejora.
 alcance": es alcance de esta especificación que no llegó al código. Se anota aquí
 para que nadie lo dé por hecho leyendo las secciones de arriba.
 
-**La §5 pide que las acepciones se muestren "agrupadas por categoría gramatical".**
-La pantalla las enseña en una lista plana, ordenada por identificador, con la
-categoría escrita en cada ficha. Con siete fichas de `bank` de golpe, agruparlas se
-notaría. Pendiente.
+*(La agrupación por categoría gramatical que pedía la §5 estaba en esta lista y ya
+está construida: las acepciones salen bajo un encabezado por categoría, en orden
+fijo.)*
 
 **Nada se ha probado en pantalla.** La implementación se hizo en un espacio aislado
 sin base de datos, así que ninguna búsqueda real ha ocurrido nunca. Sigue pendiente

@@ -52,3 +52,35 @@ describe("GET /api/diccionario", () => {
     expect((await res.json()).acepciones).toEqual([]);
   });
 });
+
+/**
+ * Si la consulta falla —la tabla del diccionario no existe porque nadie aplicó
+ * las migraciones, por ejemplo— la ruta no puede dejar que la excepción suba:
+ * Next devolvería un 500 con cuerpo HTML, el navegador reventaría al leerlo
+ * como JSON, y el usuario acabaría viendo un mensaje interno del navegador.
+ */
+describe("cuando la base de datos falla", () => {
+  it("responde 500 con un JSON que explica qué pasó", async () => {
+    buscarEnBiblioteca.mockRejectedValue(
+      new Error('relation "dictionary_entries" does not exist'),
+    );
+    buscarEnDiccionario.mockResolvedValue([]);
+
+    const res = await pide("bank");
+
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const cuerpo = await res.json();
+    expect(cuerpo.error).toMatch(/no se pudo buscar/i);
+  });
+
+  it("el mensaje menciona las migraciones, que es la causa más probable", async () => {
+    buscarEnDiccionario.mockRejectedValue(
+      new Error('relation "dictionary_entries" does not exist'),
+    );
+    buscarEnBiblioteca.mockResolvedValue([]);
+
+    const cuerpo = await (await pide("bank")).json();
+    expect(cuerpo.error).toMatch(/migraciones|diccionario/i);
+  });
+});
