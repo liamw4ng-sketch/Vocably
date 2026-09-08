@@ -404,6 +404,24 @@ describe("getDueQueue", () => {
     expect([...elegidas].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
+  it("el tamaño de sesión es un total: los repasos vencidos agotan el cupo antes que las nuevas", async () => {
+    // Con el modo por defecto ("mezcla") componerSesion reparte en el orden
+    // enCurso, vencidas, nuevas, futuras. Sin en curso, las 8 vencidas ya
+    // cubren de sobra el hueco de 2, así que no queda nada para las nuevas
+    // aunque el tope diario tuviera hueco de sobra para 5. Antes de este
+    // cambio el tamaño de sesión solo recortaba los repasos y el tope diario
+    // seguía dejando entrar nuevas por su cuenta: por eso este mismo montaje
+    // solía dar 5 nuevas + 2 repasos.
+    await saveExtraction(db, { ...base, items: Array.from({ length: 20 }, (_, i) => termino(i)) });
+    await madurar([1, 2, 3, 4, 5, 6, 7, 8]);
+    await setNewCardsPerDay(db, 5);
+    await setSessionSize(db, 2);
+
+    const { cartas } = await getDueQueue(db, { now: AHORA, aleatorio: generador(1) });
+    expect(cartas.filter((c) => c.esNueva)).toHaveLength(0);
+    expect(cartas.filter((c) => !c.esNueva)).toHaveLength(2);
+  });
+
   it("la cola trae la pista de la acepción", async () => {
     const { termId } = await anadirDesdeDiccionario(db, {
       term: "bank",
