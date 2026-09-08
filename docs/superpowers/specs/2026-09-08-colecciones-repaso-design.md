@@ -1,7 +1,9 @@
 # Vocably — Elegir qué y cuánto repasar antes de empezar
 
 **Fecha:** 2026-09-08
-**Estado:** diseñado, sin construir
+**Estado:** implementado en la rama `colecciones-repaso`
+**Enmendado:** 2026-09-08 — lo que cambió al construirlo va marcado abajo con
+*(enmienda)*.
 **Diseño general:** `docs/superpowers/specs/2026-09-06-app-vocabulario-design.md`
 **Fase 2 (el repaso que esto modifica):** `docs/superpowers/specs/2026-09-06-fase-2-repaso-design.md`
 
@@ -86,6 +88,13 @@ Esta pantalla **sustituye** a la de «Hoy no toca ninguna tarjeta»: aquel caso 
 es simplemente una pantalla previa en la que los contadores de hoy están a cero y
 todo lo que se ofrece es adelantar.
 
+**No siempre hay algo que adelantar.** *(enmienda, 2026-09-08.)* Con toda la
+biblioteca en aprendizaje y todavía sin vencer —lo que deja una sesión respondida
+entera con "Otra vez"— los totales también están a cero, y entonces ofrecer un
+número es ofrecer algo que no puede pasar: los tres modos salen a (0) y "Empezar"
+en gris. Ese estado se dice aparte («las que estás aprendiendo vuelven en unos
+minutos»), y no se confunde ni con estar al día ni con no tener vocabulario.
+
 ## 5. La regla del número
 
 Es lo único con letra pequeña, así que va sola y se explica en la propia pantalla:
@@ -121,9 +130,21 @@ que ya existe. Las **adelantadas** son la excepción: se toman por fecha de
 vencimiento, la más próxima primero. Adelantar al azar sería adelantar dos veces
 lo mismo.
 
-`repasosFuera` sigue contando los repasos vencidos que se quedaron fuera, y la
-pantalla lo sigue diciendo: un tamaño de sesión por debajo del ritmo diario
-acumula atrasos en silencio hasta que la cola es impagable.
+**Lo que queda fuera se cuenta en dos números, no en uno.** *(enmienda,
+2026-09-08.)* El diseño original hablaba de un solo `repasosFuera`, contando los
+repasos vencidos que se quedaron fuera. Al construirlo se vio que eso deja
+invisible la otra mitad: el modo también descarta colecciones enteras —"aprendidas"
+no cuela ninguna palabra en curso y "no aprendidas" ningún repaso—, así que una
+palabra fallada hace diez minutos y ya vencida podía quedarse fuera sin que nadie
+la contara, y la pantalla felicitaba por haber terminado. `componerSesion` devuelve
+ahora `repasosFuera` (aprendidas vencidas) y `enCursoFuera` (en curso vencidas),
+medidos igual: lo que estaba en el grupo y no acabó en la sesión. Van separados
+porque de ellos depende **a qué colección lleva el botón de seguir**, y ningún modo
+trae las dos: un solo total diría cuántas quedan pero no dónde buscarlas, y un botón
+que va a la equivocada devuelve una sesión vacía. La pantalla los suma para decidir
+si enseñar el aviso, y los mira por separado para elegir el modo. Sigue valiendo el
+motivo de contarlos: un tamaño de sesión por debajo del ritmo diario acumula atrasos
+en silencio hasta que la cola es impagable.
 
 ## 6. Arquitectura
 

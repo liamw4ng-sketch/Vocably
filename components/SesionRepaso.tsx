@@ -381,6 +381,28 @@ export function ajustesARecordar(
 }
 
 /**
+ * Si toda la biblioteca está a medio aprender: ni vencido ahora ni adelantable
+ * después, pero con palabras guardadas.
+ *
+ * Es lo que deja una sesión respondida entera con "Otra vez", y separa las dos
+ * maneras de que `hoy` esté a cero. `total` cuenta todo lo que se puede servir,
+ * adelantando incluido —en curso vencidas y nuevas por un lado, aprendidas por
+ * el otro—, así que un `total` a cero con `biblioteca > 0` no deja más
+ * posibilidad que ésta: lo que queda está en aprendizaje y aún no vence.
+ *
+ * Importa porque es justo el estado en el que "pon un número" no puede hacer
+ * nada: `disponibles` mira `total` en cuanto el número no es 0, de modo que los
+ * tres modos salen a (0) y desactivados por mucho que se teclee, y "Empezar"
+ * se queda en gris. Con `total > 0` —una biblioteca aprendida y todavía sin
+ * vencer, por ejemplo— adelantar sí funciona y hay que seguir ofreciéndolo:
+ * por eso no basta con mirar `biblioteca`, como hace `bibliotecaVacia`.
+ */
+export function todoEnAprendizaje(resumen: ResumenColecciones): boolean {
+  const adelantables = resumen.total.sinAprender + resumen.total.aprendidas;
+  return adelantables === 0 && resumen.biblioteca > 0;
+}
+
+/**
  * El titular de la pantalla previa y su línea de detalle.
  *
  * Fuera del JSX para poder probar la concordancia: "Hoy tienes 1 palabras" era
@@ -395,6 +417,16 @@ export function resumenLegible(resumen: ResumenColecciones): {
   const hoy = sinAprender + aprendidas;
 
   if (hoy === 0) {
+    // Las dos maneras de no tener nada para hoy se dicen distinto porque la
+    // salida es distinta: en una se puede adelantar y en la otra solo esperar.
+    if (todoEnAprendizaje(resumen)) {
+      return {
+        titulo: "Ahora mismo no toca ninguna palabra",
+        detalle:
+          "Las que estás aprendiendo vuelven en unos minutos. No hay nada que adelantar: vuelve a esta pantalla dentro de un rato.",
+      };
+    }
+
     return {
       titulo: "Hoy no toca ninguna palabra",
       detalle:

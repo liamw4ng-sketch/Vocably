@@ -5,6 +5,7 @@ import {
   validarCuantas,
   resumenLegible,
   bibliotecaVacia,
+  todoEnAprendizaje,
   modoDisponible,
   modoParaSeguir,
   etiquetaSeguir,
@@ -152,6 +153,44 @@ describe("resumenLegible", () => {
     expect(legible.detalle).toContain("pon un número");
   });
 
+  it("sin nada para hoy pero con algo que adelantar sigue ofreciendo el número", () => {
+    // Y la oferta es cierta: con un número, los modos tienen material.
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 4 });
+    expect(resumenLegible(r).detalle).toContain("pon un número");
+    expect(disponibles(r, "aprendidas", 4)).toBe(4);
+    expect(puedeEmpezar(r, "mezcla", 4)).toBe(true);
+  });
+
+  it("con la biblioteca entera en aprendizaje no dice que estés al día ni ofrece adelantar", () => {
+    // La reproducción: una sesión respondida entera con "Otra vez". No hay
+    // nada vencido y tampoco nada que adelantar, así que "pon un número" no
+    // haría nada —los tres modos salen a (0)— y "estás al día" es falso: las
+    // palabras vuelven en cuanto pase su paso de aprendizaje.
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 3);
+    const legible = resumenLegible(r);
+    expect(legible.titulo).toBe("Ahora mismo no toca ninguna palabra");
+    expect(legible.detalle).toBe(
+      "Las que estás aprendiendo vuelven en unos minutos. No hay nada que adelantar: vuelve a esta pantalla dentro de un rato.",
+    );
+    expect(legible.detalle).not.toContain("pon un número");
+    expect(legible.detalle).not.toContain("al día");
+    // Por qué no puede ofrecerlo: no hay número que saque nada.
+    for (const modo of MODOS) {
+      for (const cuantas of [0, 1, MAXIMO_TAMANO_SESION]) {
+        expect(disponibles(r, modo, cuantas)).toBe(0);
+      }
+    }
+  });
+
+  it("con la biblioteca vacía no habla de palabras en aprendizaje", () => {
+    // Ese caso no llega a esta frase —la pantalla enseña la de "no tienes
+    // ninguna palabra todavía"—, pero la función no debe inventarse palabras
+    // que no existen si alguien la llama igualmente.
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 0);
+    expect(bibliotecaVacia(r)).toBe(true);
+    expect(resumenLegible(r).titulo).not.toBe("Ahora mismo no toca ninguna palabra");
+  });
+
   it("solo mira lo de hoy, no la biblioteca entera", () => {
     const legible = resumenLegible(
       resumen({ sinAprender: 1, aprendidas: 0 }, { sinAprender: 100, aprendidas: 200 }),
@@ -178,6 +217,38 @@ describe("bibliotecaVacia", () => {
 
   it("con material para hoy tampoco está vacía", () => {
     expect(bibliotecaVacia(resumen({ sinAprender: 2, aprendidas: 1 }))).toBe(false);
+  });
+});
+
+describe("todoEnAprendizaje", () => {
+  it("es cierto con la biblioteca llena y nada que servir", () => {
+    // Tres palabras falladas hace medio minuto: en aprendizaje y sin vencer.
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 3);
+    expect(todoEnAprendizaje(r)).toBe(true);
+  });
+
+  it("es falso si queda algo que adelantar, aunque hoy no toque nada", () => {
+    // Aquí "pon un número" sí funciona, y tiene que seguir funcionando.
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 7 }, 7);
+    expect(todoEnAprendizaje(r)).toBe(false);
+    expect(puedeEmpezar(r, "aprendidas", 3)).toBe(true);
+  });
+
+  it("es falso con nuevas pendientes por encima del tope diario", () => {
+    // `hoy` está a cero porque el cupo se gastó, pero un número explícito se
+    // salta el tope: hay material.
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 5, aprendidas: 0 }, 5);
+    expect(todoEnAprendizaje(r)).toBe(false);
+  });
+
+  it("es falso con la biblioteca vacía: eso es no tener vocabulario, no tenerlo a medias", () => {
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 0);
+    expect(todoEnAprendizaje(r)).toBe(false);
+    expect(bibliotecaVacia(r)).toBe(true);
+  });
+
+  it("es falso con material para hoy", () => {
+    expect(todoEnAprendizaje(resumen({ sinAprender: 2, aprendidas: 1 }))).toBe(false);
   });
 });
 

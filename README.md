@@ -487,7 +487,7 @@ verifique todo lo siguiente:
   `/repaso`. No consume la API de Claude en ningún momento (ver "Coste").
   Pendiente solo la prueba de aceptación de más arriba, que hace el usuario en
   su móvil.
-- La suite completa suma **421 pruebas**, ninguna contra la API de Claude ni
+- La suite completa suma **429 pruebas**, ninguna contra la API de Claude ni
   contra MyMemory ni contra una base de datos real.
 - **No hay pruebas de componentes.** Vitest corre con `environment: "node"`,
   sin jsdom ni Testing Library, así que ninguna prueba puede pulsar un botón

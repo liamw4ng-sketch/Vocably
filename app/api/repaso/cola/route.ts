@@ -23,8 +23,10 @@ export async function GET(request: Request) {
     );
   }
 
-  // Se devuelve la cola entera: `cartas` y `repasosFuera`, que la pantalla
-  // necesita para decir cuántos repasos quedaron fuera de la sesión.
+  // Se devuelve la cola entera: `cartas`, `repasosFuera` y `enCursoFuera`. Los
+  // dos recuentos van por separado porque la pantalla no solo dice cuánto
+  // quedó fuera de la sesión: también decide con qué modo sigue el botón, y
+  // ningún modo trae las dos colecciones por separado (ver `VencidosFuera`).
   const cola = await getDueQueue(getDb(), {
     now: new Date(),
     source: url.searchParams.get("source") ?? undefined,
