@@ -76,7 +76,9 @@ async function enviarRespuesta(envio: EnvioRespuesta): Promise<unknown> {
   return respuesta.json();
 }
 
-/** Los dos ajustes numéricos, los únicos que pasan por `useAjusteNumerico`. */
+/** Los dos ajustes numéricos que guarda el servidor. `newCardsPerDay` se
+ * guarda al salir del campo; `sessionSize`, solo al empezar y con "Recordar
+ * esta elección" marcada. */
 export type CampoAjuste = "newCardsPerDay" | "sessionSize";
 type Ajustes = Record<CampoAjuste, number> & { sessionMode: Modo };
 
@@ -132,13 +134,13 @@ async function guardarModo(modo: Modo): Promise<{ error: string } | null> {
 }
 
 /**
- * Un ajuste numérico editable: borrador, validación en el cliente, guardado y
- * vuelta al último valor bueno si el servidor lo rechaza. Los dos ajustes se
- * comportan igual, y una segunda copia de estas líneas acabaría divergiendo
- * justo donde más duele: en la validación o en el manejo del error.
+ * Un ajuste numérico que se guarda al salir del campo: borrador, validación en
+ * el cliente, guardado y vuelta al último valor bueno si el servidor lo
+ * rechaza. Hoy lo usa solo el tope diario; "Cuántas" no pasa por aquí porque
+ * no es un ajuste permanente, sino la elección de una sesión (§4 del diseño).
  *
- * No pide su propio valor al servidor: los dos llegan en la misma respuesta y
- * quien monta la pantalla los reparte con `fijar`.
+ * No pide su propio valor al servidor: los ajustes llegan todos en la misma
+ * respuesta y quien monta la pantalla los reparte con `fijar`.
  */
 function useAjusteNumerico(
   campo: CampoAjuste,
@@ -268,6 +270,26 @@ export function puedeEmpezar(
   return disponibles(resumen, modo, cuantas) > 0;
 }
 
+/**
+ * Lo tecleado en "Cuántas", ya validado. Es la misma comprobación que hace
+ * `useAjusteNumerico` antes de guardar, pero suelta: "Cuántas" no se guarda al
+ * salir del campo —vale solo para esta sesión salvo que se marque la casilla—
+ * y aun así un número imposible tiene que explicarse y no dejar empezar.
+ */
+export function validarCuantas(texto: string): { valor: number } | { error: string } {
+  const limpio = texto.trim();
+  const numero = Number(limpio);
+  if (
+    limpio === "" ||
+    !Number.isInteger(numero) ||
+    numero < 0 ||
+    numero > MAXIMO_TAMANO_SESION
+  ) {
+    return { error: `Debe ser un número entero entre 0 y ${MAXIMO_TAMANO_SESION}.` };
+  }
+  return { valor: numero };
+}
+
 function Frase({
   frase,
   termino,
@@ -318,12 +340,22 @@ export function SesionRepaso() {
   // `Sesion` es un objeto mutable sin React dentro: hay que pedir el redibujo.
   const [, redibujar] = useReducer((n: number) => n + 1, 0);
 
-  // Lo elegido en la pantalla previa. El modo llega de los ajustes guardados y
-  // el número, de `tamanoSesion`, más abajo.
+  // Lo elegido en la pantalla previa. Modo y número salen de los ajustes
+  // guardados al cargar, pero desde ahí son elección de esta sesión: no se
+  // guardan salvo que "Recordar esta elección" esté marcada al empezar.
   const [resumen, setResumen] = useState<ResumenColecciones | null>(null);
   const [modo, setModo] = useState<Modo>(MODO_POR_DEFECTO);
+  const [cuantasBorrador, setCuantasBorrador] = useState("");
+  const [cuantasError, setCuantasError] = useState("");
   const [recordar, setRecordar] = useState(false);
   const [empezando, setEmpezando] = useState(false);
+
+  // Se valida en cada render, no al salir del campo: así lo que se pide es
+  // siempre lo que se está viendo. Con un valor imposible se usa 0 para los
+  // contadores, pero "Empezar" queda desactivado y no llega a pedirse nada.
+  const cuantasValidado = validarCuantas(cuantasBorrador);
+  const cuantasVale = "valor" in cuantasValidado;
+  const cuantas = "valor" in cuantasValidado ? cuantasValidado.valor : 0;
 
   // Repasos vencidos hoy que esta sesión dejó fuera, sea por el número pedido o
   // por el modo. Se lee al pedir la cola y se enseña al terminar: sin esto, una
@@ -341,12 +373,11 @@ export function SesionRepaso() {
     };
   }, []);
 
-  // Los dos ajustes numéricos, editables desde la pantalla previa. Ya no hacen
-  // falta ni un `ajustesCargaFallo` ni un ref de "ya lo he pedido": los ajustes
-  // llegan en la carga inicial, y si esa falla, falla la pantalla entera y hay
-  // un botón para reintentarla.
+  // El tope diario sí es un ajuste permanente: se guarda al salir del campo,
+  // como siempre. Ya no hacen falta ni un `ajustesCargaFallo` ni un ref de "ya
+  // lo he pedido": los ajustes llegan en la carga inicial, y si esa falla,
+  // falla la pantalla entera y hay un botón para reintentarla.
   const topeNuevas = useAjusteNumerico("newCardsPerDay", TOPE_MAXIMO_TARJETAS_NUEVAS, montadoRef);
-  const tamanoSesion = useAjusteNumerico("sessionSize", MAXIMO_TAMANO_SESION, montadoRef);
 
   // Carga inicial: función async dentro del efecto con su guard, igual que en
   // TermTable, para no encadenar renders desde el cuerpo del efecto. No pide la
@@ -364,7 +395,9 @@ export function SesionRepaso() {
         // marcar y no habría manera de saber qué se iba a repasar.
         setModo(esModo(ajustes.sessionMode) ? ajustes.sessionMode : MODO_POR_DEFECTO);
         topeNuevas.fijar(ajustes.newCardsPerDay);
-        tamanoSesion.fijar(ajustes.sessionSize);
+        // El número guardado solo siembra el campo: a partir de aquí vive en
+        // el borrador y no vuelve al servidor si no se marca la casilla.
+        setCuantasBorrador(String(ajustes.sessionSize));
         setEstado("antes");
       } catch {
         if (!cancelado) setEstado("error");
@@ -416,11 +449,12 @@ export function SesionRepaso() {
 
   /** Arranca la sesión con lo elegido: aquí, y solo aquí, se pide la cola. */
   const empezar = useCallback(async () => {
-    const cuantas = tamanoSesion.valor ?? 0;
     setEmpezando(true);
     try {
-      // Se guarda ANTES de pedir la cola: si la cola falla, la preferencia ya
-      // quedó guardada, que es lo que el usuario pidió al marcar la casilla.
+      // Aquí, y solo aquí, se guardan modo y número: sin la casilla marcada la
+      // elección vale para esta sesión y nada más. Se guarda ANTES de pedir la
+      // cola: si la cola falla, la preferencia ya quedó guardada, que es lo que
+      // el usuario pidió al marcarla.
       if (recordar) {
         await guardarAjuste("sessionSize", cuantas);
         await guardarModo(modo);
@@ -438,7 +472,7 @@ export function SesionRepaso() {
     } finally {
       if (montadoRef.current) setEmpezando(false);
     }
-  }, [modo, recordar, tamanoSesion.valor]);
+  }, [modo, recordar, cuantas]);
 
   const revelar = useCallback(() => setRevelada(true), []);
 
@@ -498,7 +532,6 @@ export function SesionRepaso() {
   // La pantalla previa: sustituye a la de "hoy no toca nada" y al botón de
   // adelantar, que eran casos particulares de elegir qué y cuánto repasar.
   if (estado === "antes" && resumen) {
-    const cuantas = tamanoSesion.valor ?? 0;
     const hoy = resumen.hoy.sinAprender + resumen.hoy.aprendidas;
     const biblioteca = resumen.total.sinAprender + resumen.total.aprendidas;
 
@@ -559,15 +592,20 @@ export function SesionRepaso() {
           inputMode="numeric"
           min={0}
           max={MAXIMO_TAMANO_SESION}
-          value={tamanoSesion.borrador}
-          disabled={tamanoSesion.guardando}
-          onChange={(evento: React.ChangeEvent<HTMLInputElement>) =>
-            tamanoSesion.setBorrador(evento.target.value)
+          value={cuantasBorrador}
+          onChange={(evento: React.ChangeEvent<HTMLInputElement>) => {
+            setCuantasBorrador(evento.target.value);
+            // El aviso se va en cuanto se vuelve a escribir: mientras se teclea
+            // el campo pasa por estados a medias (vacío, sobre todo) y señalar
+            // cada uno sería regañar por escribir.
+            setCuantasError("");
+          }}
+          onBlur={() =>
+            setCuantasError("error" in cuantasValidado ? cuantasValidado.error : "")
           }
-          onBlur={() => void tamanoSesion.confirmar()}
-          error={tamanoSesion.error}
+          error={cuantasError}
           ayuda={
-            tamanoSesion.error
+            cuantasError
               ? undefined
               : "0 = las que toquen hoy. Cualquier otro número es exactamente ese, adelantando las que aún no tocaban."
           }
@@ -584,10 +622,10 @@ export function SesionRepaso() {
 
         <Boton
           variante="primario"
-          // También mientras el número se está guardando: al pulsar el botón
-          // primero se sale del campo, y sin esta condición la sesión se
-          // pediría con el valor anterior, el que todavía tiene `valor`.
-          disabled={!puedeEmpezar(resumen, modo, cuantas) || empezando || tamanoSesion.guardando}
+          // Ya no hay carrera entre el `blur` del campo y este `click`: el
+          // número no pasa por el servidor, sale del borrador que se está
+          // viendo. Basta con no dejar empezar si ese borrador no vale.
+          disabled={!cuantasVale || !puedeEmpezar(resumen, modo, cuantas) || empezando}
           onClick={() => void empezar()}
         >
           {empezando ? "Preparando…" : "Empezar"}

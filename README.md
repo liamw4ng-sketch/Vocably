@@ -52,9 +52,10 @@ de aprendizaje corto—, no una tarjeta que haya "olvidado" su respuesta.)
 ### Los tres ajustes
 
 La tabla `settings` (una sola fila) guarda los tres ajustes que el usuario
-controla. Se ajustan desde la propia pantalla de repaso, en la tarjeta de
-resumen que aparece al terminar la sesión — no hay una pantalla de ajustes
-aparte.
+controla. Se tocan desde la pantalla previa del repaso — no hay una pantalla de
+ajustes aparte. `newCardsPerDay` se guarda al salir de su campo, porque es un
+ajuste permanente; `sessionSize` y `sessionMode` son la elección de esta sesión
+y solo se guardan al empezar si "Recordar esta elección" está marcada.
 
 - **`newCardsPerDay`** (20 por defecto): cuántas palabras nuevas entran al
   día cuando el tamaño de sesión es `0`. Es diario: se cuentan las
@@ -438,7 +439,7 @@ verifique todo lo siguiente:
   `/repaso`. No consume la API de Claude en ningún momento (ver "Coste").
   Pendiente solo la prueba de aceptación de más arriba, que hace el usuario en
   su móvil.
-- La suite completa suma **371 pruebas**, ninguna contra la API de Claude ni
+- La suite completa suma **376 pruebas**, ninguna contra la API de Claude ni
   contra MyMemory ni contra una base de datos real.
 - **No hay pruebas de componentes.** Vitest corre con `environment: "node"`,
   sin jsdom ni Testing Library, así que ninguna prueba puede pulsar un botón

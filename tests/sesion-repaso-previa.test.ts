@@ -1,7 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { disponibles, puedeEmpezar, ETIQUETA_MODO } from "@/components/SesionRepaso";
-import { MODOS } from "@/lib/ajustes";
+import {
+  disponibles,
+  puedeEmpezar,
+  validarCuantas,
+  ETIQUETA_MODO,
+} from "@/components/SesionRepaso";
+import { MODOS, MAXIMO_TAMANO_SESION } from "@/lib/ajustes";
 import type { ResumenColecciones } from "@/db/repository/review";
+
+/** El único mensaje de error que da `validarCuantas`, sea cual sea el motivo. */
+const MENSAJE_RANGO = `Debe ser un número entero entre 0 y ${MAXIMO_TAMANO_SESION}.`;
 
 function resumen(
   hoy: { sinAprender: number; aprendidas: number },
@@ -51,6 +59,38 @@ describe("puedeEmpezar", () => {
       expect(puedeEmpezar(r, modo, 0)).toBe(false);
       expect(puedeEmpezar(r, modo, 20)).toBe(false);
     }
+  });
+});
+
+describe("validarCuantas", () => {
+  it("acepta un entero dentro del rango y devuelve el número", () => {
+    expect(validarCuantas("20")).toEqual({ valor: 20 });
+    expect(validarCuantas("  7  ")).toEqual({ valor: 7 });
+  });
+
+  it("acepta los dos extremos: 0 y el máximo", () => {
+    expect(validarCuantas("0")).toEqual({ valor: 0 });
+    expect(validarCuantas(String(MAXIMO_TAMANO_SESION))).toEqual({
+      valor: MAXIMO_TAMANO_SESION,
+    });
+  });
+
+  it("rechaza el campo vacío en vez de tomarlo por un 0", () => {
+    expect(validarCuantas("")).toEqual({ error: MENSAJE_RANGO });
+    expect(validarCuantas("   ")).toEqual({ error: MENSAJE_RANGO });
+  });
+
+  it("rechaza negativos, decimales y lo que no es un número", () => {
+    expect(validarCuantas("-1")).toEqual({ error: MENSAJE_RANGO });
+    expect(validarCuantas("2,5")).toEqual({ error: MENSAJE_RANGO });
+    expect(validarCuantas("2.5")).toEqual({ error: MENSAJE_RANGO });
+    expect(validarCuantas("veinte")).toEqual({ error: MENSAJE_RANGO });
+  });
+
+  it("rechaza un número por encima del máximo", () => {
+    expect(validarCuantas(String(MAXIMO_TAMANO_SESION + 1))).toEqual({
+      error: MENSAJE_RANGO,
+    });
   });
 });
 
