@@ -1,6 +1,8 @@
 /**
  * La entrada al abrir la aplicación: primero el nombre, después una frase, y
- * la capa entera se va. Un segundo y medio largo en total.
+ * la capa entera se va. Poco más de tres segundos en total, y los tiempos los
+ * manda la frase: tiene que dar tiempo a leerla entera de una pasada. Los
+ * números exactos están en `app/globals.css`, junto a los fotogramas.
  *
  * **No lleva JavaScript, y eso es el diseño, no una economía.** En el App
  * Router el layout no se vuelve a montar al navegar entre pantallas, así que

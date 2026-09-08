@@ -123,8 +123,10 @@ body {
 }
 
 /* Entrada al abrir la aplicación: primero el nombre, después la frase, y la
-   capa entera se va. Un segundo y medio largo en total, que es lo que aguanta
-   algo que se ve en cada apertura.
+   capa entera se va. Poco más de tres segundos en total. Los tiempos los manda
+   la frase: hay que poder leerla entera de una pasada, y en un idioma que no es
+   el tuyo eso pide segundo y medio quieta, no un parpadeo. Se paga una vez por
+   apertura, no al cambiar de pantalla.
 
    Una vez por carga de página y nunca al navegar, sin nada de JavaScript: el
    elemento vive en el layout, que el App Router no vuelve a montar al cambiar
@@ -132,7 +134,7 @@ body {
    Ver components/ui/EntradaApp.tsx. */
 @keyframes entrada-app {
   0%,
-  88% {
+  90% {
     opacity: 1;
   }
   100% {
@@ -145,8 +147,8 @@ body {
     opacity: 0;
     transform: translateY(6px);
   }
-  25%,
-  70% {
+  20%,
+  75% {
     opacity: 1;
     transform: none;
   }
@@ -161,7 +163,7 @@ body {
     opacity: 0;
     transform: translateY(6px);
   }
-  25%,
+  40%,
   100% {
     opacity: 1;
     transform: none;
@@ -172,18 +174,23 @@ body {
   /* Sin `forwards` a propósito: el reposo es el `opacity: 0` en línea del
      componente, así que la capa es invisible antes de la animación, después, y
      también si esta hoja no ha llegado todavía. */
-  animation: entrada-app 1600ms ease-out;
+  animation: entrada-app 3200ms ease-out;
 }
 
 /* Los dos textos sí llevan `both`: el nombre se queda apagado tras irse y la
-   frase se sostiene hasta que la capa entera se desvanece. El retardo de la
-   frase empieza justo cuando el nombre termina de salir. */
+   frase se sostiene hasta que la capa entera se desvanece —su fotograma final
+   es opacidad 1, así que `both` la mantiene ahí mucho después de que su propia
+   animación acabe—. El retardo de la frase es exactamente la duración del
+   nombre: entra justo cuando el otro ha terminado de salir, no encima.
+
+   Lo que se ve, en limpio: el nombre entero de 200 a 750 ms, la frase entera de
+   1320 a 2880 ms, y la capa se va a los 3200. */
 .entrada-nombre {
-  animation: entrada-nombre 650ms ease-out both;
+  animation: entrada-nombre 1000ms ease-out both;
 }
 
 .entrada-frase {
-  animation: entrada-frase 900ms ease-out 700ms both;
+  animation: entrada-frase 800ms ease-out 1000ms both;
 }
 
 /* Cambio de sección: el contenido entra en vez de aparecer de golpe. Va en
