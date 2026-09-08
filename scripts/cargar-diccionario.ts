@@ -1,7 +1,5 @@
-import { createReadStream } from "node:fs";
-import { createGunzip } from "node:zlib";
-import { createInterface } from "node:readline";
 import { cargarDiccionario } from "@/db/repository/diccionario";
+import { lineasDeFicheroGz } from "@/lib/diccionario/lineas";
 import { getDb } from "@/db/client";
 
 /**
@@ -23,13 +21,10 @@ async function main() {
     process.exit(1);
   }
 
-  const lineas = createInterface({
-    input: createReadStream(ruta).pipe(createGunzip()),
-    crlfDelay: Infinity,
-  });
-
+  // Perezosa a propósito: `cargarDiccionario` no empieza a leer hasta haber
+  // abierto la transacción y vaciado la tabla. Ver `lineasDeFicheroGz`.
   const inicio = Date.now();
-  const { entradas, filas } = await cargarDiccionario(getDb(), lineas);
+  const { entradas, filas } = await cargarDiccionario(getDb(), lineasDeFicheroGz(ruta));
   const segundos = Math.round((Date.now() - inicio) / 1000);
   console.log(`Cargadas ${entradas} entradas (${filas} acepciones) en ${segundos} s.`);
 }
