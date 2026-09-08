@@ -91,14 +91,14 @@ async function pedirAjustes(): Promise<Ajustes> {
 /** Lo que se puede cambiar de una vez. `PATCH /api/ajustes` acepta uno de los
  * tres ajustes o varios a la vez, así que guardar modo y número al empezar es
  * una sola petición y no dos idas y vueltas antes de pedir la cola. */
-type CambioAjustes = Partial<Ajustes>;
+export type CambioAjustes = Partial<Ajustes>;
 
 /** Guarda los ajustes que se le pasen y devuelve los que el servidor dice
  * tener, o un mensaje de error en español si los rechazó o si la petición ni
  * siquiera pudo hacerse (sin conexión, DNS, servidor caído): en ese caso
  * `fetch` lanza, y sin capturarlo aquí la llamante se quedaría con el `await`
  * colgado para siempre. */
-async function guardarAjustes(
+export async function guardarAjustes(
   cambios: CambioAjustes,
 ): Promise<{ ajustes: Partial<Ajustes> } | { error: string }> {
   let respuesta: Response;
@@ -302,6 +302,47 @@ export function modoParaSeguir(modo: Modo): Modo {
 }
 
 /**
+ * Lo que dice el botón "Seguir", dado el modo con el que arrancó la sesión que
+ * se acaba de terminar.
+ *
+ * Fuera del JSX por el mismo motivo que `resumenLegible`: un texto compuesto
+ * dentro de una expresión de render no se puede leer sin montar el componente,
+ * y ahí es donde se coló "Hoy tienes 1 palabras". El nombre de la colección
+ * sale de `ETIQUETA_MODO`, así que es literalmente el del botón de la pantalla
+ * previa: dos nombres para la misma colección serían dos colecciones.
+ */
+export function etiquetaSeguir(modoSesion: Modo): string {
+  const siguiente = modoParaSeguir(modoSesion);
+  return siguiente === modoSesion
+    ? "Seguir repasando"
+    : `Seguir con "${ETIQUETA_MODO[siguiente]}"`;
+}
+
+/**
+ * Qué se escribe en los ajustes al empezar con "Recordar esta elección"
+ * marcada.
+ *
+ * El número siempre: es lo que el usuario acaba de teclear. **El modo solo si
+ * lo ha pulsado en esta visita.** Sin tocarlo, el modo que se ve marcado puede
+ * no ser el guardado sino aquel al que la pantalla ha caído por falta de
+ * material hoy (`modoDisponible`), y guardar eso cambiaría la colección de
+ * mañana por una circunstancia de hoy, en silencio: quien guardó "No
+ * aprendidas", gastó el cupo del día y marcó la casilla para recordar el
+ * número, se encontraría "Aprendidas" guardado sin haberlo pedido. Si lo ha
+ * pulsado, `modo` es su elección y se guarda tal cual.
+ *
+ * La sesión se sigue repasando con el modo que la pantalla enseña marcado;
+ * esto es solo lo que se escribe en los ajustes.
+ */
+export function ajustesARecordar(
+  cuantas: number,
+  modo: Modo,
+  modoTocado: boolean,
+): CambioAjustes {
+  return modoTocado ? { sessionSize: cuantas, sessionMode: modo } : { sessionSize: cuantas };
+}
+
+/**
  * El titular de la pantalla previa y su línea de detalle.
  *
  * Fuera del JSX para poder probar la concordancia: "Hoy tienes 1 palabras" era
@@ -406,6 +447,10 @@ export function SesionRepaso() {
   // guardan salvo que "Recordar esta elección" esté marcada al empezar.
   const [resumen, setResumen] = useState<ResumenColecciones | null>(null);
   const [modo, setModo] = useState<Modo>(MODO_POR_DEFECTO);
+  // ¿Ha pulsado el usuario alguno de los tres botones de colección en esta
+  // visita? Decide si "Recordar esta elección" tiene algo que decir sobre el
+  // modo o solo sobre el número; `ajustesARecordar` explica por qué.
+  const [modoTocado, setModoTocado] = useState(false);
   const [cuantasBorrador, setCuantasBorrador] = useState("");
   const [cuantasError, setCuantasError] = useState("");
   const [recordar, setRecordar] = useState(false);
@@ -486,6 +531,9 @@ export function SesionRepaso() {
         // es JSON sin comprobar: un valor viejo dejaría los tres botones sin
         // marcar y no habría manera de saber qué se iba a repasar.
         setModo(esModo(ajustes.sessionMode) ? ajustes.sessionMode : MODO_POR_DEFECTO);
+        // Sembrar no es elegir: el modo que acaba de llegar es el guardado, y
+        // marcar la casilla sin tocar ningún botón no debe reescribirlo.
+        setModoTocado(false);
         fijarTope(ajustes.newCardsPerDay);
         // El número guardado solo siembra el campo: a partir de aquí vive en
         // el borrador y no vuelve al servidor si no se marca la casilla.
@@ -539,11 +587,12 @@ export function SesionRepaso() {
   /**
    * Arranca una sesión: aquí, y solo aquí, se pide la cola. El modo se pasa
    * porque no siempre es el elegido —"Seguir repasando" puede cambiarlo—, y
-   * `guardar` porque esa continuación no debe tocar los ajustes: la casilla
-   * habla de la elección de la pantalla previa, no del modo al que se cae.
+   * `aRecordar` porque lo que se guarda no tiene por qué ser lo que se repasa:
+   * la continuación no guarda nada, y "Empezar" puede guardar el número sin
+   * tocar el modo (ver `ajustesARecordar`).
    */
   const arrancar = useCallback(
-    async (modoElegido: Modo, guardar: boolean) => {
+    async (modoElegido: Modo, aRecordar: CambioAjustes | null) => {
       setEmpezando(true);
       try {
         // Aquí, y solo aquí, se guardan modo y número: sin la casilla marcada
@@ -551,11 +600,8 @@ export function SesionRepaso() {
         // pedir la cola —si la cola falla, la preferencia ya quedó guardada, que
         // es lo que el usuario pidió al marcarla— y en una sola petición, que
         // la ruta acepta varios ajustes a la vez.
-        if (guardar) {
-          const guardado = await guardarAjustes({
-            sessionSize: cuantas,
-            sessionMode: modoElegido,
-          });
+        if (aRecordar) {
+          const guardado = await guardarAjustes(aRecordar);
           if (!montadoRef.current) return;
           // Un fallo aquí no para el repaso, pero se dice: si no, la próxima
           // visita enseña los valores viejos y la casilla parece rota.
@@ -583,17 +629,23 @@ export function SesionRepaso() {
     [cuantas],
   );
 
-  /** "Empezar": lo elegido en la pantalla previa, guardado si se ha marcado. */
+  /**
+   * "Empezar": se repasa el modo que la pantalla enseña marcado (`modoEfectivo`,
+   * que puede ser al que se ha caído la elección), pero lo que se guarda con la
+   * casilla marcada es lo que el usuario eligió (`modo`), y solo si llegó a
+   * pulsar un botón. Son dos cosas distintas a propósito: ver `ajustesARecordar`.
+   */
   const empezar = useCallback(
-    () => arrancar(modoEfectivo, recordar),
-    [arrancar, modoEfectivo, recordar],
+    () =>
+      arrancar(modoEfectivo, recordar ? ajustesARecordar(cuantas, modo, modoTocado) : null),
+    [arrancar, modoEfectivo, recordar, cuantas, modo, modoTocado],
   );
 
   /** "Seguir repasando": otra sesión con lo que quedó fuera, sin guardar nada.
    * El modo puede no ser el mismo; `modoParaSeguir` explica por qué. */
   const modoSeguir = modoParaSeguir(modoSesion);
   const seguir = useCallback(
-    () => arrancar(modoSeguir, false),
+    () => arrancar(modoSeguir, null),
     [arrancar, modoSeguir],
   );
 
@@ -713,7 +765,12 @@ export function SesionRepaso() {
                 // Marcado y desactivado a la vez es una pantalla sin salida.
                 variante={opcion === modoEfectivo ? "primario" : "secundario"}
                 disabled={!puedeEmpezar(resumen, opcion, cuantas)}
-                onClick={() => setModo(opcion)}
+                onClick={() => {
+                  setModo(opcion);
+                  // A partir de aquí la casilla también gobierna el modo: es
+                  // una elección del usuario y no una caída de la pantalla.
+                  setModoTocado(true);
+                }}
               >
                 {ETIQUETA_MODO[opcion]} ({disponibles(resumen, opcion, cuantas)})
               </Boton>
@@ -900,11 +957,7 @@ export function SesionRepaso() {
                 : `Quedan ${repasosFuera} repasos más para hoy que no entraron en esta sesión.`}
             </p>
             <Boton variante="primario" disabled={empezando} onClick={() => void seguir()}>
-              {empezando
-                ? "Preparando…"
-                : modoSeguir === modoSesion
-                  ? "Seguir repasando"
-                  : `Seguir con "${ETIQUETA_MODO[modoSeguir]}"`}
+              {empezando ? "Preparando…" : etiquetaSeguir(modoSesion)}
             </Boton>
           </div>
         ) : null}

@@ -56,6 +56,10 @@ controla. Se tocan desde la pantalla previa del repaso — no hay una pantalla d
 ajustes aparte. `newCardsPerDay` se guarda al salir de su campo, porque es un
 ajuste permanente; `sessionSize` y `sessionMode` son la elección de esta sesión
 y solo se guardan al empezar si "Recordar esta elección" está marcada.
+`sessionMode`, además, solo se guarda si el usuario ha pulsado uno de los tres
+botones de colección: cuando el modo guardado se queda sin material hoy, la
+pantalla se cae al primero que sí lo tenga, y eso es una circunstancia del día,
+no una elección que deba sobrescribir la de mañana.
 
 - **`newCardsPerDay`** (20 por defecto): cuántas palabras nuevas entran al
   día cuando el tamaño de sesión es `0`. Es diario: se cuentan las
@@ -439,7 +443,7 @@ verifique todo lo siguiente:
   `/repaso`. No consume la API de Claude en ningún momento (ver "Coste").
   Pendiente solo la prueba de aceptación de más arriba, que hace el usuario en
   su móvil.
-- La suite completa suma **389 pruebas**, ninguna contra la API de Claude ni
+- La suite completa suma **400 pruebas**, ninguna contra la API de Claude ni
   contra MyMemory ni contra una base de datos real.
 - **No hay pruebas de componentes.** Vitest corre con `environment: "node"`,
   sin jsdom ni Testing Library, así que ninguna prueba puede pulsar un botón

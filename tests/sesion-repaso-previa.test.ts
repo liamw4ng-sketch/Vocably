@@ -6,6 +6,8 @@ import {
   resumenLegible,
   modoDisponible,
   modoParaSeguir,
+  etiquetaSeguir,
+  ajustesARecordar,
   ETIQUETA_MODO,
 } from "@/components/SesionRepaso";
 import { MODOS, MAXIMO_TAMANO_SESION } from "@/lib/ajustes";
@@ -206,6 +208,55 @@ describe("modoParaSeguir", () => {
     for (const modo of MODOS) {
       expect(modoParaSeguir(modo)).not.toBe("no-aprendidas");
     }
+  });
+
+  it("el botón dice a qué colección se sigue cuando cambia", () => {
+    // El texto vivía escrito a mano dentro del JSX, que es lo mismo que
+    // produjo "Hoy tienes 1 palabras". Aquí se puede leer.
+    expect(etiquetaSeguir("no-aprendidas")).toBe('Seguir con "Aprendidas"');
+  });
+
+  it("sin cambio de colección, el botón dice lo de siempre", () => {
+    expect(etiquetaSeguir("aprendidas")).toBe("Seguir repasando");
+    expect(etiquetaSeguir("mezcla")).toBe("Seguir repasando");
+  });
+
+  it("el nombre que enseña es el mismo del botón de la pantalla previa", () => {
+    // Dos nombres distintos para la misma colección serían dos colecciones a
+    // ojos del usuario.
+    for (const modo of MODOS) {
+      const etiqueta = etiquetaSeguir(modo);
+      if (etiqueta !== "Seguir repasando") {
+        expect(etiqueta).toBe(`Seguir con "${ETIQUETA_MODO[modoParaSeguir(modo)]}"`);
+      }
+    }
+  });
+});
+
+describe("ajustesARecordar", () => {
+  it("sin haber tocado ningún modo, guarda el número y deja el modo como estaba", () => {
+    // El caso que rompía: con "No aprendidas" guardado y el cupo del día
+    // gastado, la pantalla cae a "Aprendidas". Marcar la casilla es querer
+    // guardar el número que se acaba de teclear, no cambiar de colección para
+    // siempre por una caída de hoy.
+    expect(ajustesARecordar(20, "aprendidas", false)).toEqual({ sessionSize: 20 });
+    expect("sessionMode" in ajustesARecordar(20, "aprendidas", false)).toBe(false);
+  });
+
+  it("con un modo pulsado, guarda los dos", () => {
+    expect(ajustesARecordar(20, "aprendidas", true)).toEqual({
+      sessionSize: 20,
+      sessionMode: "aprendidas",
+    });
+  });
+
+  it("el cero es un número como otro cualquiera", () => {
+    // "0 = las que toquen hoy" es una elección legítima y la de fábrica: si se
+    // cayera por ser falsy, no habría manera de volver a ella.
+    expect(ajustesARecordar(0, "mezcla", true)).toEqual({
+      sessionSize: 0,
+      sessionMode: "mezcla",
+    });
   });
 });
 
