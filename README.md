@@ -49,9 +49,9 @@ ya respondida en esa misma cola. (Si una tarjeta valorada "Otra vez" vuelve a
 salir al cabo de unos minutos, es el comportamiento normal de FSRS —un paso
 de aprendizaje corto—, no una tarjeta que haya "olvidado" su respuesta.)
 
-### Los dos ajustes
+### Los tres ajustes
 
-La tabla `settings` (una sola fila) guarda los dos números que el usuario
+La tabla `settings` (una sola fila) guarda los tres ajustes que el usuario
 controla. Se ajustan desde la propia pantalla de repaso, en la tarjeta de
 resumen que aparece al terminar la sesión — no hay una pantalla de ajustes
 aparte.
@@ -59,9 +59,13 @@ aparte.
 - **`newCardsPerDay`** (20 por defecto): cuántas palabras nuevas entran al
   día. Es diario: se cuentan las introducciones ya registradas hoy
   (`review_logs` con `state = 0` desde la medianoche de Madrid) y se resta.
-- **`reviewsPerSession`** (0 por defecto): cuántas palabras ya aprendidas
-  entran en cada sesión. **0 significa "todas las que venzan"**, así que por
-  defecto la app no recorta nada por su cuenta.
+- **`sessionSize`** (0 por defecto): cuántas palabras entran en cada sesión.
+  **0 significa "las que toquen hoy"**, así que por defecto la app no recorta
+  nada por su cuenta.
+- **`sessionMode`** (`mezcla` por defecto): de cuál colección salen las
+  palabras. Los valores válidos son `no-aprendidas` (solo nuevas),
+  `aprendidas` (solo ya aprendidas que venzan) o `mezcla` (nuevas y
+  aprendidas vencidas, mezcladas).
 
 Cuando vencen más palabras aprendidas de las que caben en la sesión, se
 **sortean**: cuáles entran se decide al azar, no por antigüedad ni por id, de
