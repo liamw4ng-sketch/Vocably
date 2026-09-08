@@ -64,9 +64,9 @@ aparte.
   nada por su cuenta.
 - **`sessionMode`** (`mezcla` por defecto): de cuál colección salen las
   palabras. Los valores válidos son `no-aprendidas` (en curso y nuevas),
-  `aprendidas` (ya aprendidas que venzan; si el tamaño de sesión no se llena
-  con esas, adelanta las que aún no vencían) o `mezcla` (nuevas y aprendidas
-  vencidas, mezcladas).
+  `aprendidas` (ya aprendidas que venzan) o `mezcla` (en curso, aprendidas
+  vencidas y nuevas). En `aprendidas` y en `mezcla`, si el tamaño de sesión no
+  se llena con esas, también adelanta las que aún no vencían.
 
 Cuando vencen más palabras aprendidas de las que caben en la sesión, se
 **sortean**: cuáles entran se decide al azar, no por antigüedad ni por id, de
