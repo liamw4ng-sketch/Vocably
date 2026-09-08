@@ -142,10 +142,12 @@ describe("componerSesion, el sorteo", () => {
       aleatorio: () => 0,
     });
 
-    // barajar con aleatorio()=0 rota el array; lo que importa es que NO sea
-    // el orden de llegada, o el sorteo no estaría actuando.
-    expect(ids(cartas)).not.toEqual([1, 2]);
-    expect(cartas).toHaveLength(2);
+    // barajar() es determinístico cuando se inyecta aleatorio: barajar([1,2,3,4], () => 0)
+    // rota el array a [2,3,4,1], así que slice(0,2) da exactamente [2, 3].
+    // Verificamos que aleatorio() está conectado a barajar: el test falla si
+    // la implementación no lo usa (p.ej. un .slice(-hueco) o .reverse() pasaría
+    // pero daría otro resultado distinto).
+    expect(ids(cartas)).toEqual([2, 3]);
   });
 
   it("no toca el orden si caben todas", () => {
