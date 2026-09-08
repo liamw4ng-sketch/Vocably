@@ -2,6 +2,12 @@
 
 **Fecha:** 2026-09-09
 **Estado:** especificado, sin implementar
+**Enmendado:** 2026-09-09, antes de escribir el plan — el borrador daba por hecho
+que `dictionary_entries.translations` dejaba de escribirse, y no es verdad:
+*afinar con IA* escribe ahí, para una acepción concreta, y de ahí sale el español
+que se guarda al añadir una palabra. Lo que había era un traslado que movía
+español de acepción a una tabla de palabra y perdía precisión. Se sustituye por
+la regla de los dos niveles (§5.1).
 **Diseño general:** `docs/superpowers/specs/2026-09-06-app-vocabulario-design.md`
 **Diccionario (lo que esto modifica):** `docs/superpowers/specs/2026-09-07-diccionario-design.md`
 
@@ -95,11 +101,14 @@ MyMemory traduce *la palabra*, no *la acepción*. Escribir esa traducción encim
 de cada acepción inglesa haría parecer que cada una tiene su español propio, que
 es falso. Quien lo escribió prefirió no guardar antes que falsear.
 
-**Se disuelve con la tabla nueva** (§5): el español se guarda una vez, a nivel de
-palabra, que es el nivel al que MyMemory responde. `traducirSiFalta` desaparece
-como tal —su trabajo pasa al escalón 4 de §6—, y `dictionary_entries` deja de
-escribirse: conserva solo lo que trajo el volcado inglés, que se traslada una vez
-a la tabla nueva (§8.1).
+**Se disuelve con la tabla nueva** (§5): el español de MyMemory se guarda a nivel
+de palabra, que es el nivel al que MyMemory responde, y ahí no hay nada que
+falsear. `traducirSiFalta` desaparece como tal; su trabajo pasa al escalón 4 de
+§6.
+
+Lo que **no** cambia: `dictionary_entries.translations` sigue escribiéndose desde
+*afinar con IA*, porque esa respuesta sí es de la acepción concreta que se le
+pide. Lo único que deja de tocarla es MyMemory (§5.1).
 
 ### 4.2 No se comprueba la cuota
 
@@ -134,7 +143,7 @@ export const spanishMeanings = pgTable(
     pos: text("pos").notNull(),
     /** Los significados en español, en el orden del original. */
     meanings: text("meanings").array().notNull().default([]),
-    /** `wikcionario-es` | `wikcionario-en` | `mymemory`. */
+    /** `wikcionario-es` | `mymemory`. */
     source: text("source").notNull(),
   },
   (table) => ({
@@ -162,6 +171,28 @@ duplique.
 **Se guardan hasta ocho significados y se enseñan cinco.** El fichero filtrado ya
 trae hasta ocho; recortar a cinco al cargar ahorraría kilobytes y costaría una
 descarga de 95 MB el día que se quieran seis.
+
+### 5.1 Los dos niveles, y por qué no se mezclan
+
+Después de esto hay **dos sitios con español**, y cada uno guarda lo suyo a su
+nivel de precisión. No es duplicación: es que los orígenes responden a preguntas
+distintas.
+
+| | `dictionary_entries.translations` | `spanish_meanings` |
+|---|---|---|
+| Responde a | qué significa **esta acepción** | qué significa **esta palabra** |
+| Lo llena | el volcado inglés (1.372) y *afinar con IA* | Wikcionario español y MyMemory |
+| Se enseña | en la ficha de su acepción | arriba, como bloque de la palabra |
+
+**Ahí está la raíz del fallo de §4.1**: MyMemory contesta a la segunda pregunta y
+se le estaba guardando en el sitio de la primera. Por eso el arreglo no es
+cambiar una condición sino darle su nivel; y por eso *afinar con IA*, que sí
+contesta a la primera, se queda donde está.
+
+**Al añadir una palabra a la biblioteca**, el español que se guarda en la tarjeta
+sale, por este orden: lo escrito a mano, si hay algo; si no, el de la acepción; y
+si no, el de la palabra. Los dos primeros escalones son los de hoy; el tercero es
+nuevo y solo añade salidas donde antes no había ninguna.
 
 ## 6. La consulta
 
@@ -199,30 +230,18 @@ La respuesta de la ruta gana un campo `significados`, una lista de grupos
 - El grupo de MyMemory —categoría vacía— sale sin encabezado de categoría, porque
   no se sabe de cuál habla.
 - Debajo de cada grupo, en letra pequeña, **de dónde sale**: «Wikcionario
-  español», «Wikcionario inglés» o «traducción automática». Los dos primeros los
-  han escrito personas y el tercero es una máquina; enseñarlos igual sería mentir
-  sobre lo que se lee.
-- El **inglés queda plegado** y se abre a petición. Sigue siendo lo que se guarda
-  como `senseHint` al añadir una acepción a la biblioteca, así que las tarjetas
-  no cambian en nada.
+  español» o «traducción automática». Uno lo han escrito personas y el otro es
+  una máquina; enseñarlos igual sería mentir sobre lo que se lee.
+- Debajo, las fichas de cada acepción como hoy, pero con el **significado en
+  inglés plegado**, abriéndose a petición. El inglés sigue guardándose como
+  `senseHint` al añadir, así que las tarjetas no cambian en nada.
+- El español propio de una acepción —el que trajo el volcado inglés o dejó
+  *afinar con IA*— sigue saliendo **en su ficha**, no plegado: es más preciso que
+  el de la palabra y por eso no se esconde (§5.1).
 - Sin español en ningún origen: se dice con esas palabras, y el botón de afinar
   con IA queda al lado.
 
 ## 8. La carga
-
-### 8.1 El traslado de lo que ya hay
-
-Antes de nada, **las 1.372 acepciones inglesas que sí traen español pasan a la
-tabla nueva**, con `source: "wikcionario-en"` y la categoría de su acepción. Sin
-este paso quedarían invisibles: la consulta de §6 solo mira `spanish_meanings`, y
-ese español está pagado y es de fuente humana.
-
-Como el volcado inglés guarda una fila por acepción y la tabla nueva una por
-palabra y categoría, las traducciones de varias acepciones de la misma palabra y
-categoría se juntan en una sola lista, sin repetidos y en el orden en que
-estaban.
-
-### 8.2 El volcado español
 
 `scripts/cargar-espanol.ts`, hermano del cargador del diccionario inglés y con la
 misma forma: lee `dicc_es.jsonl.gz` línea a línea con **`lineasDeFicheroGz`** —el
@@ -230,10 +249,9 @@ generador perezoso que arregló el cuelgue de la carga anterior— y escribe por
 lotes dentro de una transacción.
 
 Es idempotente por el índice único de §5: volver a cargarlo actualiza en vez de
-duplicar. **Donde choque con una fila `wikcionario-en`, gana el español**: una es
-un diccionario escrito en español y la otra una tabla de traducciones. Con las de
-MyMemory no choca nunca, porque aquellas ocupan la categoría vacía y estas una
-categoría de verdad; de esa convivencia se ocupa la consulta, no la carga (§6).
+duplicar. Con las filas de MyMemory no choca nunca, porque aquellas ocupan la
+categoría vacía y estas una categoría de verdad; de esa convivencia se ocupa la
+consulta, no la carga (§6).
 
 El fichero se produce con `filtrar_es.py`, ya escrito y ejecutado, que filtra el
 volcado de kaikki.org **mientras se descarga**: los 95 MB comprimidos no se
@@ -259,11 +277,10 @@ Con PGlite, contra una base de verdad:
   búsqueda ya no se le llama**; no lo resuelve nadie y la respuesta lo dice.
 - Una palabra con filas de Wikcionario **y** de MyMemory enseña solo las
   primeras, y la de MyMemory sigue en la base.
-- El traslado de §8.1 junta en una lista, sin repetidos, las traducciones de
-  varias acepciones de la misma palabra y categoría.
+- El español propio de una acepción sigue llegando a la ficha, y **al añadir a la
+  biblioteca manda sobre el de la palabra** (§5.1).
 - Cargar dos veces el mismo fichero deja el mismo número de filas.
-- Una segunda carga pisa una fila `wikcionario-en` con la española, y no borra
-  ninguna de MyMemory.
+- Una segunda carga no borra ninguna fila de MyMemory.
 
 ## 10. Fuera de alcance
 
@@ -280,13 +297,10 @@ Con PGlite, contra una base de verdad:
 ## 11. Orden de construcción
 
 1. La tabla `spanish_meanings` y su migración.
-2. El traslado de lo que ya hay (§8.1). Va antes que el volcado nuevo para que la
-   tabla nunca esté vacía y para que el orden de precedencia de §8.2 se ejercite
-   de verdad.
-3. El módulo puro que lee el volcado, y el cargador.
-4. La consulta del escalón 3 y la cadena de §6.
-5. Los dos arreglos de MyMemory (§4), que dependen de que la tabla ya exista.
-6. La pantalla.
+2. El módulo puro que lee el volcado, y el cargador.
+3. La consulta del escalón 3 y la cadena de §6.
+4. Los dos arreglos de MyMemory (§4), que dependen de que la tabla ya exista.
+5. La pantalla.
 
 La migración se aplica a la base real **a mano, ejecutando el `.sql`**, no con
 `drizzle-kit push`: push no ejecuta el fichero, compara `db/schema.ts` con la
