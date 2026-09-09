@@ -45,8 +45,10 @@ function palabraAntesDe(texto: string, indice: number): string {
  * El punto es ambiguo: también aparece en decimales ("19.99") y en
  * abreviaturas ("Dr."). Dos reglas, sin adivinar más:
  *
- * (a) Un punto que no va seguido de espacio ni de fin de texto no termina
- *     frase. Así "19.99" no se trocea: el punto va pegado al "99".
+ * (a) Un punto con un dígito justo antes y un dígito justo después no
+ *     termina frase: es un punto decimal ("19.99"). Cualquier otro punto
+ *     pegado a texto sin espacio detrás —incluidas dos frases reales que un
+ *     PDF mal extraído dejó unidas sin espacio— sí termina frase.
  * (b) Un punto que cierra una abreviatura de la lista {@link ABREVIATURAS}
  *     tampoco termina frase. Es una heurística acotada: cualquier otra
  *     abreviatura que no esté en la lista seguirá partiendo la frase en dos.
@@ -63,9 +65,14 @@ function dividirEnFrases(texto: string): string[] {
     if (c !== "." && c !== "!" && c !== "?") continue;
 
     if (c === ".") {
+      const anterior = texto[i - 1];
       const siguiente = texto[i + 1];
-      const pegadoAAlgo = siguiente !== undefined && !/\s/.test(siguiente);
-      if (pegadoAAlgo) continue; // p. ej. el punto decimal de "19.99"
+      const esDecimal =
+        anterior !== undefined &&
+        /[0-9]/.test(anterior) &&
+        siguiente !== undefined &&
+        /[0-9]/.test(siguiente);
+      if (esDecimal) continue; // p. ej. el punto decimal de "19.99"
       if (ABREVIATURAS.has(palabraAntesDe(texto, i))) continue;
     }
 

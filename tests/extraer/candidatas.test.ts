@@ -73,6 +73,21 @@ describe("candidatasDeTexto", () => {
     expect([...frases][0]).toBe("Dr. Smith arrived early.");
   });
 
+  /**
+   * Un artefacto habitual de extracción de PDF: dos frases reales pegadas
+   * sin espacio tras el punto. Ese punto no tiene un dígito a cada lado, así
+   * que no es un decimal: sí debe terminar la frase. Si no la termina,
+   * "arrived" y "then" caen en la misma "frase" y el grupo de dos palabras
+   * "arrived then" se inventa una combinación que el texto nunca tuvo.
+   */
+  it("un punto sin espacio que une dos frases reales sí termina frase", () => {
+    const salida = candidatasDeTexto("He arrived.Then left.");
+    const textos = salida.map((c) => c.texto);
+    expect(textos).not.toContain("arrived then");
+    const frases = new Set(salida.map((c) => c.frase));
+    expect(frases.size).toBe(2);
+  });
+
   it("conserva apóstrofos y guiones, que son parte de la palabra", () => {
     const salida = textos("It's a well-known problem");
     expect(salida).toContain("it's");
