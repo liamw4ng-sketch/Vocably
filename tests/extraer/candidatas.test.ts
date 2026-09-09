@@ -50,10 +50,45 @@ describe("candidatasDeTexto", () => {
     expect(perros[0].frase).toBe("The dog barked.");
   });
 
+  /**
+   * Un punto de decimal no es fin de frase: no va seguido de espacio ni de
+   * fin de texto. Si se trocea ahí, "today" queda con un fragmento ("99
+   * today.") que nunca existió como oración.
+   */
+  it("un punto de un número decimal no termina la frase", () => {
+    const salida = candidatasDeTexto("The exam costs 19.99 today.");
+    const hoy = salida.find((c) => c.texto === "today");
+    expect(hoy?.frase).toBe("The exam costs 19.99 today.");
+  });
+
+  /**
+   * Una abreviatura corriente de la lista acotada (Mr, Mrs, Ms, Dr, Prof,
+   * St, vs, etc, e.g, i.e) tampoco termina la frase. Fuera de esa lista,
+   * cualquier otra abreviatura seguirá partiendo la frase en dos.
+   */
+  it("una abreviatura corriente de la lista (Dr.) no termina la frase", () => {
+    const salida = candidatasDeTexto("Dr. Smith arrived early.");
+    const frases = new Set(salida.map((c) => c.frase));
+    expect(frases.size).toBe(1);
+    expect([...frases][0]).toBe("Dr. Smith arrived early.");
+  });
+
   it("conserva apóstrofos y guiones, que son parte de la palabra", () => {
     const salida = textos("It's a well-known problem");
     expect(salida).toContain("it's");
     expect(salida).toContain("well-known");
+  });
+
+  /**
+   * Los libros tipografiados casi siempre usan la comilla curva (’, U+2019)
+   * en vez de la recta (', U+0027) para contracciones y posesivos. Si el
+   * regex solo acepta la recta, "It's" se rompe en "it" y "s" sueltos.
+   */
+  it("conserva también el apóstrofo curvo de las contracciones", () => {
+    const salida = textos("It’s a well-known problem");
+    expect(salida).toContain("it’s");
+    expect(salida).not.toContain("it");
+    expect(salida).not.toContain("s");
   });
 
   it("deja fuera los números y la puntuación suelta", () => {
