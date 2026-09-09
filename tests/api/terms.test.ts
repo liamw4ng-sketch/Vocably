@@ -363,7 +363,33 @@ describe("POST /api/terms", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ creadas: 2, repetidas: 0 });
+    expect(await res.json()).toEqual({ creadas: 2, repetidas: 0, fallidas: 0 });
+  });
+
+  /**
+   * Postgres rechaza el byte nulo en un campo de texto: una entrada mala en
+   * medio del lote no puede tumbar la petición entera con un 500 genérico.
+   */
+  it("un lote con una entrada mala devuelve 200 con los tres números, no un 500", async () => {
+    const res = await POST(
+      postRequest({
+        entradas: [
+          { term: "dog", pos: "noun", gloss: "An animal.", example: null, translation: "perro", level: "B1" },
+          {
+            term: "malo\0",
+            pos: "noun",
+            gloss: "Con un byte nulo.",
+            example: null,
+            translation: "malo",
+            level: "B1",
+          },
+          { term: "cat", pos: "noun", gloss: "Another.", example: null, translation: "gato", level: "B1" },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ creadas: 2, repetidas: 0, fallidas: 1 });
   });
 
   /**

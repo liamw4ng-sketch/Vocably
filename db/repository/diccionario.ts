@@ -209,10 +209,14 @@ export async function anadirDesdeDiccionario(
  * Añade varias acepciones de una vez.
  *
  * Existe porque marcar cuarenta candidatas en una extracción no puede ser
- * cuarenta viajes al servidor. Reutiliza `anadirDesdeDiccionario` una por una:
- * cada llamada abre su propia transacción, así que **una que falle no deshace
- * las anteriores**, que es lo que se quiere aquí — perder treinta y nueve
- * palabras buenas por una mala sería peor que guardarlas.
+ * cuarenta viajes al servidor. Reutiliza `anadirDesdeDiccionario` una por una,
+ * pero cada llamada va dentro de su propio `try/catch`. Lo que garantiza el
+ * diseño no es que el lote entero se salve o se pierda junto: es que ninguna
+ * palabra arrastra a las demás, ni a las que ya se guardaron ni a las que
+ * quedan por intentar. Si una entrada falla (por ejemplo, un término con un
+ * carácter que Postgres rechaza en un campo de texto), su transacción se
+ * deshace sola, la entrada se cuenta como fallida, y el bucle sigue con la
+ * siguiente.
  */
 export async function anadirVariasDesdeDiccionario(
   db: Database,
@@ -224,13 +228,18 @@ export async function anadirVariasDesdeDiccionario(
     translation: string;
     level: string;
   }>,
-): Promise<{ creadas: number; repetidas: number }> {
+): Promise<{ creadas: number; repetidas: number; fallidas: number }> {
   let creadas = 0;
   let repetidas = 0;
+  let fallidas = 0;
   for (const entrada of entradas) {
-    const { created } = await anadirDesdeDiccionario(db, entrada);
-    if (created) creadas += 1;
-    else repetidas += 1;
+    try {
+      const { created } = await anadirDesdeDiccionario(db, entrada);
+      if (created) creadas += 1;
+      else repetidas += 1;
+    } catch {
+      fallidas += 1;
+    }
   }
-  return { creadas, repetidas };
+  return { creadas, repetidas, fallidas };
 }

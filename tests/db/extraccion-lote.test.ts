@@ -16,7 +16,7 @@ describe("anadirVariasDesdeDiccionario", () => {
       entrada("house", "A building."),
     ]);
 
-    expect(r).toEqual({ creadas: 2, repetidas: 0 });
+    expect(r).toEqual({ creadas: 2, repetidas: 0, fallidas: 0 });
     expect(await db.select().from(terms)).toHaveLength(2);
     await close();
   });
@@ -39,14 +39,39 @@ describe("anadirVariasDesdeDiccionario", () => {
       entrada("cat", "Another animal."),
     ]);
 
-    expect(r).toEqual({ creadas: 1, repetidas: 1 });
+    expect(r).toEqual({ creadas: 1, repetidas: 1, fallidas: 0 });
     expect(await db.select().from(terms)).toHaveLength(2);
     await close();
   });
 
   it("con la lista vacía no crea nada", async () => {
     const { db, close } = await createTestDb();
-    expect(await anadirVariasDesdeDiccionario(db, [])).toEqual({ creadas: 0, repetidas: 0 });
+    expect(await anadirVariasDesdeDiccionario(db, [])).toEqual({ creadas: 0, repetidas: 0, fallidas: 0 });
+    await close();
+  });
+
+  /**
+   * Postgres rechaza el byte nulo dentro de un campo de texto: es una forma
+   * realista de hacer fallar una sola inserción sin tocar nada más. La
+   * entrada a mitad de lote falla; las de después no deben saltarse.
+   */
+  it("una entrada que falla no aborta las siguientes, y el fallo se cuenta", async () => {
+    const { db, close } = await createTestDb();
+
+    const r = await anadirVariasDesdeDiccionario(db, [
+      entrada("uno", "Primera."),
+      entrada("dos", "Segunda."),
+      entrada("tres\0malo", "Tiene un byte nulo: Postgres rechaza esta fila."),
+      entrada("cuatro", "Cuarta."),
+      entrada("cinco", "Quinta."),
+    ]);
+
+    expect(r).toEqual({ creadas: 4, repetidas: 0, fallidas: 1 });
+
+    // Las dos palabras posteriores a la que falla sí se guardaron: el fallo
+    // de una entrada no aborta el resto del lote.
+    const guardados = await db.select({ term: terms.term }).from(terms);
+    expect(guardados.map((t) => t.term).sort()).toEqual(["cinco", "cuatro", "dos", "uno"]);
     await close();
   });
 });
