@@ -204,3 +204,33 @@ export async function anadirDesdeDiccionario(
     return { termId: creado.id, created: true };
   });
 }
+
+/**
+ * Añade varias acepciones de una vez.
+ *
+ * Existe porque marcar cuarenta candidatas en una extracción no puede ser
+ * cuarenta viajes al servidor. Reutiliza `anadirDesdeDiccionario` una por una:
+ * cada llamada abre su propia transacción, así que **una que falle no deshace
+ * las anteriores**, que es lo que se quiere aquí — perder treinta y nueve
+ * palabras buenas por una mala sería peor que guardarlas.
+ */
+export async function anadirVariasDesdeDiccionario(
+  db: Database,
+  entradas: Array<{
+    term: string;
+    pos: string;
+    gloss: string;
+    example: string | null;
+    translation: string;
+    level: string;
+  }>,
+): Promise<{ creadas: number; repetidas: number }> {
+  let creadas = 0;
+  let repetidas = 0;
+  for (const entrada of entradas) {
+    const { created } = await anadirDesdeDiccionario(db, entrada);
+    if (created) creadas += 1;
+    else repetidas += 1;
+  }
+  return { creadas, repetidas };
+}

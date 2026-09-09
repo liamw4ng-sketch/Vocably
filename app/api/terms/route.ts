@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { listTerms } from "@/db/repository/terms";
-import { anadirDesdeDiccionario } from "@/db/repository/diccionario";
+import { anadirDesdeDiccionario, anadirVariasDesdeDiccionario } from "@/db/repository/diccionario";
 import { isCefrLevel } from "@/lib/extraction-schema";
 import { getDb } from "@/db/client";
 
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   return NextResponse.json({ terms: rows });
 }
 
-type PostBody = {
+type EntradaTermino = {
   term?: string;
   pos?: string;
   gloss?: string;
@@ -28,12 +28,51 @@ type PostBody = {
   level?: string;
 };
 
+type PostBody = EntradaTermino & { entradas?: EntradaTermino[] };
+
 export async function POST(request: Request) {
   let body: PostBody | null;
   try {
     body = (await request.json()) as PostBody | null;
   } catch {
     return NextResponse.json({ error: "El cuerpo de la petición no es JSON válido." }, { status: 400 });
+  }
+
+  // El camino del lote: una extracción marca cuarenta candidatas de una vez, y
+  // cuarenta peticiones serían cuarenta viajes al servidor. El camino de una
+  // sola entrada, que es el que usa la pantalla del diccionario, sigue intacto
+  // debajo.
+  if (Array.isArray(body?.entradas)) {
+    const validas = body.entradas.filter(
+      (e): e is Required<Pick<EntradaTermino, "term" | "pos" | "gloss" | "translation" | "level">> &
+        EntradaTermino =>
+        esString(e?.term) &&
+        esString(e?.pos) &&
+        esString(e?.gloss) &&
+        esString(e?.translation) &&
+        esString(e?.level) &&
+        isCefrLevel(e.level as string),
+    );
+
+    if (validas.length === 0) {
+      return NextResponse.json(
+        { error: "Ninguna de las palabras enviadas está completa." },
+        { status: 400 },
+      );
+    }
+
+    const resultado = await anadirVariasDesdeDiccionario(
+      getDb(),
+      validas.map((e) => ({
+        term: e.term as string,
+        pos: e.pos as string,
+        gloss: e.gloss as string,
+        example: e.example ?? null,
+        translation: e.translation as string,
+        level: e.level as string,
+      })),
+    );
+    return NextResponse.json(resultado);
   }
 
   const { term, pos, gloss, example, translation, level } = body ?? {};

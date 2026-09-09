@@ -351,4 +351,34 @@ describe("POST /api/terms", () => {
     const [row] = await listTerms(testDb, {});
     expect(row.term).toBe("bank");
   });
+
+  it("guarda un lote entero en una sola petición", async () => {
+    const res = await POST(
+      postRequest({
+        entradas: [
+          { term: "dog", pos: "noun", gloss: "An animal.", example: null, translation: "perro", level: "B1" },
+          { term: "cat", pos: "noun", gloss: "Another.", example: null, translation: "gato", level: "B1" },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ creadas: 2, repetidas: 0 });
+  });
+
+  /**
+   * El camino viejo, el de la pantalla del diccionario, no puede cambiar:
+   * sigue respondiendo 201 al crear, como ya comprueba
+   * "guarda la acepción y responde 201" más arriba.
+   */
+  it("una sola entrada sigue funcionando como antes", async () => {
+    const res = await POST(
+      postRequest({
+        term: "house", pos: "noun", gloss: "A building.",
+        example: null, translation: "casa", level: "A1",
+      }),
+    );
+
+    expect(res.status).toBe(201);
+  });
 });
