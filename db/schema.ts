@@ -176,3 +176,35 @@ export const spanishMeanings = pgTable(
     ),
   }),
 );
+
+/**
+ * El nivel del MCER de una palabra, por categoría gramatical. Se carga una vez
+ * desde el CEFR-J Vocabulary Profile y el complemento Octanove para C1/C2, y no
+ * se vuelve a escribir.
+ *
+ * Existe porque sin IA hace falta un criterio para decidir qué palabra de un
+ * texto merece la pena aprender, y **la frecuencia no sirve**: en la franja
+ * 5.000-20.000 de las más usadas conviven un 39 % de palabras B2 con un 9 % de
+ * A2. El nivel sí separa.
+ *
+ * La categoría se guarda **ya traducida** al vocabulario del proyecto
+ * (`adj`, `adv`…), no como la nombra el listado (`adjective`, `adverb`): si se
+ * guardara cruda, ninguna palabra casaría con su ficha del diccionario.
+ */
+export const cefrLevels = pgTable(
+  "cefr_levels",
+  {
+    id: serial("id").primaryKey(),
+    termNormalized: text("term_normalized").notNull(),
+    term: text("term").notNull(),
+    pos: text("pos").notNull(),
+    /** `A1` | `A2` | `B1` | `B2` | `C1` | `C2`. */
+    level: text("level").notNull(),
+  },
+  (table) => ({
+    terminoPosIdx: uniqueIndex("cefr_levels_term_pos_idx").on(
+      table.termNormalized,
+      table.pos,
+    ),
+  }),
+);
