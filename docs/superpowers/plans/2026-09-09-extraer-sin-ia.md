@@ -1195,7 +1195,6 @@ imposible por construcción, no por disciplina. La prueba «una palabra sin espa
 se ofrece igual, con la lista vacía» es su cara observable: con una llamada al
 traductor de por medio, esa lista no vendría vacía. Si al revisar ves un import
 del traductor en este fichero, **eso sí es un hallazgo**.
-```
 
 - [ ] **Step 2: Ejecuta la prueba para verla fallar**
 
