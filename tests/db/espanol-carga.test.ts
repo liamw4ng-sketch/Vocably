@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createTestDb } from "@/tests/helpers/test-db";
 import { cargarEspanol, ORIGEN_MYMEMORY, ORIGEN_WIKCIONARIO_ES } from "@/db/repository/espanol";
 import { spanishMeanings } from "@/db/schema";
+import { MAXIMO_SIGNIFICADOS_GUARDADOS } from "@/lib/diccionario/espanol";
 
 async function* lineasDe(...textos: string[]) {
   for (const t of textos) yield t;
@@ -76,6 +77,74 @@ describe("cargarEspanol", () => {
 
     expect(resultado).toEqual({ entradas: 7 });
     expect(await db.select().from(spanishMeanings)).toHaveLength(7);
+    await close();
+  });
+
+  /**
+   * Caso real del volcado: `frog` como sustantivo aparece tres veces porque son
+   * tres etimologías distintas, cada una con su propio significado en español
+   * ("Rana.", "Francés.", "Camino, calle, carretera."). El volcado viene
+   * ordenado por palabra, así que las repeticiones caen en el mismo lote de
+   * 500 y `ON CONFLICT DO UPDATE` no soporta tocar la misma fila dos veces en
+   * la misma sentencia: sin fusionar, la carga entera revienta.
+   */
+  it("dos líneas con la misma palabra y categoría en el mismo lote no revientan la carga, y dejan una fila", async () => {
+    const { db, close } = await createTestDb();
+    const rana = JSON.stringify({ w: "frog", p: "noun", s: ["Rana."] });
+    const frances = JSON.stringify({ w: "frog", p: "noun", s: ["Francés."] });
+
+    const resultado = await cargarEspanol(db, lineasDe(rana, frances), { tamanoLote: 10 });
+
+    expect(resultado).toEqual({ entradas: 1 });
+    const filas = await db.select().from(spanishMeanings);
+    expect(filas).toHaveLength(1);
+    await close();
+  });
+
+  it("fusiona los significados de las líneas repetidas, en orden y sin repetidos exactos, en vez de descartar", async () => {
+    const { db, close } = await createTestDb();
+    const rana = JSON.stringify({ w: "frog", p: "noun", s: ["Rana.", "Ranilla."] });
+    const frances = JSON.stringify({ w: "frog", p: "noun", s: ["Francés."] });
+    const camino = JSON.stringify({ w: "frog", p: "noun", s: ["Francés.", "Camino, calle, carretera."] });
+
+    const resultado = await cargarEspanol(db, lineasDe(rana, frances, camino), { tamanoLote: 10 });
+
+    expect(resultado).toEqual({ entradas: 1 });
+    const [fila] = await db.select().from(spanishMeanings);
+    // "Francés." aparece en dos entradas pero solo debe quedar una vez, y el
+    // orden de llegada se conserva; nada se descarta salvo el repetido exacto.
+    expect(fila.meanings).toEqual(["Rana.", "Ranilla.", "Francés.", "Camino, calle, carretera."]);
+    expect(fila.term).toBe("frog");
+    await close();
+  });
+
+  it("recorta a MAXIMO_SIGNIFICADOS_GUARDADOS después de fusionar, no antes", async () => {
+    const { db, close } = await createTestDb();
+    const primeraMitad = JSON.stringify({
+      w: "frog",
+      p: "noun",
+      s: ["Significado 1.", "Significado 2.", "Significado 3.", "Significado 4.", "Significado 5."],
+    });
+    const segundaMitad = JSON.stringify({
+      w: "frog",
+      p: "noun",
+      s: ["Significado 6.", "Significado 7.", "Significado 8.", "Significado 9."],
+    });
+
+    await cargarEspanol(db, lineasDe(primeraMitad, segundaMitad), { tamanoLote: 10 });
+
+    const [fila] = await db.select().from(spanishMeanings);
+    expect(fila.meanings).toHaveLength(MAXIMO_SIGNIFICADOS_GUARDADOS);
+    expect(fila.meanings).toEqual([
+      "Significado 1.",
+      "Significado 2.",
+      "Significado 3.",
+      "Significado 4.",
+      "Significado 5.",
+      "Significado 6.",
+      "Significado 7.",
+      "Significado 8.",
+    ]);
     await close();
   });
 });
