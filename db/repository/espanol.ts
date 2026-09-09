@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { spanishMeanings } from "@/db/schema";
 import type { Database } from "@/db/types";
 import {
@@ -6,6 +6,7 @@ import {
   MAXIMO_SIGNIFICADOS_GUARDADOS,
   type FilaEspanola,
 } from "@/lib/diccionario/espanol";
+import { variantesDelLema } from "@/lib/diccionario/lema";
 
 /** 500 filas por INSERT: por encima, el número de parámetros incomoda al driver. */
 const TAMANO_LOTE = 500;
@@ -110,4 +111,44 @@ export async function cargarEspanol(
 
     return { entradas };
   });
+}
+
+export type SignificadosDePalabra = {
+  term: string;
+  pos: string;
+  meanings: string[];
+  source: string;
+};
+
+/**
+ * El español de una palabra. Prueba la forma escrita y luego sus variantes de
+ * lema, igual que `buscarEnDiccionario`, y se para en la primera que responde.
+ *
+ * **Teniendo Wikcionario, se descarta lo de MyMemory**: enseñar a la vez un
+ * diccionario escrito por personas y una traducción automática de la misma
+ * palabra es ruido. La fila descartada no se borra — si mañana el volcado deja
+ * de traer la palabra, vuelve a servir sin gastar cuota otra vez.
+ */
+export async function buscarSignificadosEspanoles(
+  db: Database,
+  termino: string,
+): Promise<SignificadosDePalabra[]> {
+  for (const clave of variantesDelLema(termino)) {
+    const filas = await db
+      .select({
+        term: spanishMeanings.term,
+        pos: spanishMeanings.pos,
+        meanings: spanishMeanings.meanings,
+        source: spanishMeanings.source,
+      })
+      .from(spanishMeanings)
+      .where(eq(spanishMeanings.termNormalized, clave))
+      .orderBy(spanishMeanings.id);
+
+    if (filas.length === 0) continue;
+
+    const deWikcionario = filas.filter((f) => f.source === ORIGEN_WIKCIONARIO_ES);
+    return deWikcionario.length > 0 ? deWikcionario : filas;
+  }
+  return [];
 }
