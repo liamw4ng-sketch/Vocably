@@ -2,11 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import {
   buscarTermino,
   anadirAcepcion,
-  acepcionConTraduccion,
   avisoSinAcepciones,
   botonAnadirDeshabilitado,
   cuandoTocaRepasar,
   afinarConIA,
+  etiquetaDeOrigen,
+  significadosDeLaAcepcion,
+  traduccionParaGuardar,
+  sinEspanolEnNingunOrigen,
 } from "@/components/BuscadorDiccionario";
 
 const acepcion = {
@@ -63,7 +66,7 @@ describe("buscarTermino", () => {
 describe("anadirAcepcion", () => {
   it("manda el término, su significado como pista y el nivel elegido", async () => {
     const fetchFalso = fetchQueDevuelve({ termId: 3, created: true }, 201);
-    await anadirAcepcion(acepcion, "B1", fetchFalso as unknown as typeof fetch);
+    await anadirAcepcion(acepcion, "B1", "orilla", fetchFalso as unknown as typeof fetch);
 
     const [url, opciones] = fetchFalso.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/terms");
@@ -79,7 +82,7 @@ describe("anadirAcepcion", () => {
   it("sin nivel no llama al servidor", async () => {
     const fetchFalso = fetchQueDevuelve({}, 201);
     await expect(
-      anadirAcepcion(acepcion, "", fetchFalso as unknown as typeof fetch),
+      anadirAcepcion(acepcion, "", "orilla", fetchFalso as unknown as typeof fetch),
     ).rejects.toThrow(/nivel/i);
     expect(fetchFalso).not.toHaveBeenCalled();
   });
@@ -87,8 +90,22 @@ describe("anadirAcepcion", () => {
   it("propaga el error del servidor con su mensaje", async () => {
     const fetchFalso = fetchQueDevuelve({ error: "Elige un nivel del MCER." }, 400);
     await expect(
-      anadirAcepcion(acepcion, "B1", fetchFalso as unknown as typeof fetch),
+      anadirAcepcion(acepcion, "B1", "orilla", fetchFalso as unknown as typeof fetch),
     ).rejects.toThrow("Elige un nivel del MCER.");
+  });
+
+  it("manda la traducción que se le pasa, no la de la acepción", async () => {
+    const fetchFalso = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
+    const acepcion = {
+      id: 1, term: "bank", pos: "noun", gloss: "An edge of a river.",
+      example: null, translations: [], yaGuardada: false,
+    };
+
+    await anadirAcepcion(acepcion, "B2", "orilla", fetchFalso as unknown as typeof fetch);
+
+    const cuerpo = JSON.parse(String(fetchFalso.mock.calls[0][1]?.body));
+    expect(cuerpo.translation).toBe("orilla");
+    expect(cuerpo.gloss).toBe("An edge of a river.");
   });
 });
 
@@ -120,19 +137,123 @@ describe("afinarConIA", () => {
   });
 });
 
-describe("acepcionConTraduccion", () => {
-  it("lo escrito a mano manda sobre lo que trajo el traductor", () => {
-    const conManual = acepcionConTraduccion({ ...acepcion, translations: ["banco"] }, "  orilla  ");
-    expect(conManual.translations).toEqual(["orilla"]);
+describe("etiquetaDeOrigen", () => {
+  /**
+   * Uno es un diccionario escrito por personas y el otro una máquina.
+   * Enseñarlos igual sería mentir sobre lo que se está leyendo.
+   */
+  it("distingue el diccionario de la traducción automática", () => {
+    expect(etiquetaDeOrigen("wikcionario-es")).toBe("Wikcionario español");
+    expect(etiquetaDeOrigen("mymemory")).toBe("traducción automática");
   });
 
-  it("sin nada escrito se guarda lo del traductor", () => {
-    expect(acepcionConTraduccion(acepcion, "   ").translations).toEqual(["orilla"]);
+  it("un origen desconocido sale tal cual en vez de en blanco", () => {
+    expect(etiquetaDeOrigen("otro")).toBe("otro");
+  });
+});
+
+describe("significadosDeLaAcepcion", () => {
+  const significados = [
+    { pos: "noun", nombre: "Sustantivo", meanings: ["Perro."], source: "wikcionario-es" },
+    { pos: "verb", nombre: "Verbo", meanings: ["Acosar."], source: "wikcionario-es" },
+  ];
+
+  it("da los de su categoría", () => {
+    expect(significadosDeLaAcepcion(significados, "verb")).toEqual(["Acosar."]);
   });
 
-  it("da salida a una acepción sin traducción ninguna: es la vía gratuita", () => {
-    const sinTraduccion = { ...acepcion, translations: [] };
-    expect(acepcionConTraduccion(sinTraduccion, "orilla").translations).toEqual(["orilla"]);
+  /**
+   * MyMemory no dice de qué categoría habla, así que su grupo vale para
+   * cualquier acepción: es el único español que hay.
+   */
+  it("si no hay de su categoría, cae en el grupo sin categoría", () => {
+    const soloMyMemory = [{ pos: "", nombre: "", meanings: ["rechazar"], source: "mymemory" }];
+    expect(significadosDeLaAcepcion(soloMyMemory, "verb")).toEqual(["rechazar"]);
+  });
+
+  it("sin nada que valga, devuelve vacío", () => {
+    expect(significadosDeLaAcepcion(significados, "adj")).toEqual([]);
+    expect(significadosDeLaAcepcion([], "noun")).toEqual([]);
+  });
+
+  /**
+   * Con las dos a la vez —su categoría y la vacía, con significados
+   * distintos— tiene que ganar la propia: la vacía es solo el recurso para
+   * cuando no hay nada más específico, no la primera opción. Una
+   * implementación que mirase primero el grupo vacío pasaría las otras tres
+   * pruebas igual (ninguna presenta ambos grupos a la vez) y solo esta la
+   * delata.
+   */
+  it("con su categoría y también un grupo sin categoría, gana el de su categoría", () => {
+    const conAmbos = [
+      { pos: "verb", nombre: "Verbo", meanings: ["Acosar."], source: "wikcionario-es" },
+      { pos: "", nombre: "", meanings: ["rechazar"], source: "mymemory" },
+    ];
+    expect(significadosDeLaAcepcion(conAmbos, "verb")).toEqual(["Acosar."]);
+  });
+});
+
+describe("traduccionParaGuardar", () => {
+  it("lo escrito a mano manda sobre todo", () => {
+    expect(traduccionParaGuardar("  mi versión ", ["de la acepción"], ["de la palabra"])).toBe("mi versión");
+  });
+
+  /**
+   * El de la acepción es más preciso que el de la palabra: viene del volcado
+   * inglés o de afinar con IA, que responden por esa acepción concreta.
+   */
+  it("sin nada escrito, manda el de la acepción sobre el de la palabra", () => {
+    expect(traduccionParaGuardar("", ["orilla"], ["banco", "reserva"])).toBe("orilla");
+  });
+
+  it("y si la acepción no tiene, sirve el de la palabra: solo el primero", () => {
+    expect(traduccionParaGuardar("", [], ["banco", "reserva"])).toBe("banco");
+  });
+
+  it("sin ninguno de los tres, cadena vacía", () => {
+    expect(traduccionParaGuardar("   ", [], [])).toBe("");
+  });
+
+  /**
+   * El español de la palabra son definiciones enteras del Wikcionario, no
+   * equivalentes cortos, y hasta cinco seguidas —con su punto final y sus
+   * comas internas— no se pueden estudiar en el reverso de una tarjeta. Esta
+   * prueba falla si alguien vuelve a unirlas con `.join(", ")`, que es
+   * justo el fallo que se arregla aquí: para `language` el reverso quedaba
+   * "Idioma., Lengua, lenguaje., Léxico, jerga, vocabulario., …".
+   */
+  it("nunca junta varias definiciones de la palabra en una sola traducción", () => {
+    const definicionesDeLanguage = [
+      "Idioma.",
+      "Lengua, lenguaje.",
+      "Léxico, jerga, vocabulario.",
+      "Redacción, texto (de un pasaje específico).",
+      "Grosería, lenguaje soez.",
+    ];
+
+    const guardado = traduccionParaGuardar("", [], definicionesDeLanguage);
+
+    expect(guardado).toBe("Idioma.");
+    expect(guardado).not.toBe(definicionesDeLanguage.join(", "));
+  });
+});
+
+/**
+ * El aviso que faltaba (hallazgo A): sin esto, una acepción sin español de
+ * ningún origen enseña el término, un desplegable cerrado, el botón «Añadir»
+ * deshabilitado y ninguna explicación de por qué.
+ */
+describe("sinEspanolEnNingunOrigen", () => {
+  it("sin nada en ningún origen, avisa", () => {
+    expect(sinEspanolEnNingunOrigen([], [])).toBe(true);
+  });
+
+  it("con español de la acepción, no avisa", () => {
+    expect(sinEspanolEnNingunOrigen(["orilla"], [])).toBe(false);
+  });
+
+  it("con español de la palabra, no avisa", () => {
+    expect(sinEspanolEnNingunOrigen([], ["banco"])).toBe(false);
   });
 });
 
@@ -167,28 +288,19 @@ describe("avisoSinAcepciones", () => {
 });
 
 describe("botonAnadirDeshabilitado", () => {
-  it("se deshabilita sin nivel elegido", () => {
-    expect(botonAnadirDeshabilitado("", 1, false)).toBe(true);
+  it("hace falta nivel y alguna traducción", () => {
+    expect(botonAnadirDeshabilitado("", "perro", false)).toBe(true);
+    expect(botonAnadirDeshabilitado("B2", "", false)).toBe(true);
+    expect(botonAnadirDeshabilitado("B2", "   ", false)).toBe(true);
+    expect(botonAnadirDeshabilitado("B2", "perro", false)).toBe(false);
   });
 
-  it("se deshabilita sin traducción al español", () => {
-    expect(botonAnadirDeshabilitado("B1", 0, false)).toBe(true);
-  });
-
-  it("se habilita sin traductor si la usuaria escribe la traducción a mano", () => {
-    expect(botonAnadirDeshabilitado("B1", 0, false, "orilla")).toBe(false);
-  });
-
-  it("los espacios no cuentan como traducción escrita", () => {
-    expect(botonAnadirDeshabilitado("B1", 0, false, "   ")).toBe(true);
-  });
-
-  it("se deshabilita mientras la petición de esta tarjeta está en vuelo, aunque nivel y traducción ya estén listos", () => {
-    expect(botonAnadirDeshabilitado("B1", 1, true)).toBe(true);
-  });
-
-  it("se habilita con nivel, traducción y sin ninguna petición en vuelo", () => {
-    expect(botonAnadirDeshabilitado("B1", 1, false)).toBe(false);
+  /**
+   * Con la petición en vuelo se deshabilita: dos clics mandarían dos POST antes
+   * de que la pantalla oculte el botón.
+   */
+  it("con la petición en vuelo, deshabilitado", () => {
+    expect(botonAnadirDeshabilitado("B2", "perro", true)).toBe(true);
   });
 });
 
@@ -223,7 +335,7 @@ describe("cuando el servidor responde algo que no es JSON", () => {
 
   it("anadirAcepcion tampoco escupe el mensaje del navegador", async () => {
     await expect(
-      anadirAcepcion(acepcion, "B1", fetchQueDevuelveHtml(500)),
+      anadirAcepcion(acepcion, "B1", "orilla", fetchQueDevuelveHtml(500)),
     ).rejects.toThrow(/servidor/i);
   });
 

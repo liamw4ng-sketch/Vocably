@@ -43,6 +43,13 @@
       "when": 1788881255487,
       "tag": "0005_organic_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788908502269,
+      "tag": "0006_cooing_paibok",
+      "breakpoints": true
     }
   ]
 }

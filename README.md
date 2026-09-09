@@ -205,6 +205,25 @@ más simple y más seguro que intentar fusionar fila a fila, y el diccionario es
 material de consulta, no datos del usuario, así que no hay nada que perder al
 recargarlo.
 
+### El diccionario español
+
+Los significados en español salen del volcado del Wikcionario **español**, que es
+otro fichero distinto del inglés. Se produce con `~/Vocably-diccionario/filtrar_es.py`,
+que filtra el volcado de kaikki.org mientras se descarga (los 95 MB no se guardan):
+
+```bash
+curl -s https://kaikki.org/dictionary/downloads/es/es-extract.jsonl.gz | gunzip | python3 filtrar_es.py
+```
+
+Y se carga con:
+
+```bash
+DATABASE_URL='...' npm run cargar:espanol -- ~/Vocably-diccionario/dicc_es.jsonl.gz
+```
+
+Es idempotente: volver a cargarlo actualiza en vez de duplicar, y no toca las
+traducciones que ya trajo MyMemory.
+
 ## En local
 
 ```bash

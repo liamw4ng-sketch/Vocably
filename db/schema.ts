@@ -128,10 +128,51 @@ export const dictionaryEntries = pgTable(
     gloss: text("gloss").notNull(),
     example: text("example"),
     translations: text("translations").array().notNull().default([]),
-    /** `wiktionary` | `mymemory` | `claude`. Nulo mientras no haya traducción. */
+    /** `wiktionary` | `claude`. Nulo mientras no haya traducción. */
     translationSource: text("translation_source"),
   },
   (table) => ({
     termNormalizedIdx: index("dictionary_entries_term_normalized_idx").on(table.termNormalized),
+  }),
+);
+
+/**
+ * El español **de una palabra**, no de una acepción: una fila por palabra y
+ * categoría gramatical, con su lista ordenada de significados.
+ *
+ * Deliberadamente separada de `dictionary_entries`. Los dos Wikcionarios son
+ * obras independientes y no numeran igual sus acepciones, así que colgar los
+ * significados españoles de las acepciones inglesas daría a entender una
+ * correspondencia que no existe. Y es justo la raíz del fallo que esto arregla:
+ * MyMemory contesta "qué significa esta palabra" y se le estaba guardando en el
+ * sitio de "qué significa esta acepción".
+ *
+ * `dictionary_entries.translations` sigue guardando lo segundo, que es lo que
+ * escribe *afinar con IA*.
+ */
+export const spanishMeanings = pgTable(
+  "spanish_meanings",
+  {
+    id: serial("id").primaryKey(),
+    termNormalized: text("term_normalized").notNull(),
+    term: text("term").notNull(),
+    /**
+     * Categoría gramatical tal como la nombra Wikcionario. **Cadena vacía** en
+     * lo que viene de MyMemory, que traduce la palabra sin decir de qué
+     * categoría habla; así sus filas nunca chocan con las de Wikcionario en el
+     * índice único de abajo.
+     */
+    pos: text("pos").notNull(),
+    /** Los significados en español, en el orden del original. */
+    meanings: text("meanings").array().notNull().default([]),
+    /** `wikcionario-es` | `mymemory`. */
+    source: text("source").notNull(),
+  },
+  (table) => ({
+    // Es también lo que hace que recargar el volcado actualice en vez de duplicar.
+    terminoPosIdx: uniqueIndex("spanish_meanings_term_pos_idx").on(
+      table.termNormalized,
+      table.pos,
+    ),
   }),
 );
