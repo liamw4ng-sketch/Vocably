@@ -27,7 +27,9 @@ export async function GET(request: Request) {
       buscarSignificadosEspanoles(db, termino),
     ]);
 
-    // El escalón de pago: solo si los tres gratuitos no dieron español.
+    // El último escalón gratuito, el que tiene cuota diaria: solo se pisa si
+    // los tres anteriores no dieron español. Aquí tampoco se gasta dinero —
+    // lo único que cuesta vive en /api/diccionario/afinar.
     const conEspanol = await completarConTraductor(
       db,
       termino,
