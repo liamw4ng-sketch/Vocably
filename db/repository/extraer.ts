@@ -13,6 +13,18 @@ export type Sugerencia = {
   gloss: string;
   example: string | null;
   frase: string;
+  /**
+   * El español **de esta acepción** (`dictionary_entries.translations`): lo que
+   * traía el volcado inglés o lo que dejó escrito "Afinar con IA" en la
+   * pantalla del diccionario. Es el primer escalón automático del reverso de la
+   * tarjeta, por delante de `significados`, que son los de la palabra entera.
+   */
+  traducciones: string[];
+  /**
+   * El español **de la palabra** (`spanish_meanings`): definiciones enteras del
+   * Wikcionario español, hasta cinco. Sirven para leerlas en pantalla; del
+   * reverso de la tarjeta solo sale la primera (`lib/diccionario/traduccion.ts`).
+   */
   significados: string[];
   /** `null` cuando el listado del MCER no la cubre: verbos frasales y rarezas. */
   nivel: Nivel | null;
@@ -55,6 +67,10 @@ export async function buscarSugerencias(
         pos: dictionaryEntries.pos,
         gloss: dictionaryEntries.gloss,
         example: dictionaryEntries.example,
+        // El español de la acepción. Sin esto, la pantalla solo tenía los
+        // significados de la palabra y acababa guardándolos encadenados como
+        // reverso de la tarjeta.
+        translations: dictionaryEntries.translations,
       })
       .from(dictionaryEntries)
       .where(inArray(dictionaryEntries.termNormalized, textos))
@@ -111,6 +127,7 @@ export async function buscarSugerencias(
         gloss: acepcion.gloss,
         example: acepcion.example,
         frase: frases.get(termNormalized) ?? "",
+        traducciones: acepcion.translations,
         significados: significadosDe(termNormalized, acepcion.pos),
         nivel,
         tipo,
@@ -119,8 +136,16 @@ export async function buscarSugerencias(
     });
   }
 
-  // Primero lo que no tiene nivel medido —los frasales y las expresiones—, en el
-  // orden del texto; después las sueltas, de más difícil a más fácil.
+  // Primero lo de **varias palabras** —frasales y expresiones—, en el orden del
+  // texto; después las sueltas, de más difícil a más fácil. Es el orden que
+  // pide la especificación (§8): son lo que el usuario más quiere y lo que
+  // ninguna fuente gratuita sabe puntuar.
+  //
+  // Se agrupa por número de palabras, no por si tienen nivel: no es lo mismo.
+  // El listado del MCER trae ocho entradas verbales de varias palabras
+  // (`mull over`, `eke out`), que son frasales **con** nivel medido y aun así
+  // van en el primer bloque. Dentro de él manda el orden del texto, porque el
+  // nivel que tengan unos pocos no ordenaría a los demás.
   conOrden.sort((a, b) => {
     const aEsSuelta = a.sugerencia.tipo === "word";
     const bEsSuelta = b.sugerencia.tipo === "word";

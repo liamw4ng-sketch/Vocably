@@ -21,12 +21,24 @@ const TAMANO_LOTE = 500;
  * `ON CONFLICT DO UPDATE` que toque dos veces la misma fila en el mismo INSERT,
  * y eso tumbaría la carga entera. El listado trae la misma clave repetida
  * cuando dos grafías de una entrada normalizan igual.
+ *
+ * Devuelve **los dos números**, que no son el mismo y ninguno sobra:
+ *
+ * - `entradas`: las líneas del CSV que sirvieron. Es lo que se compara con el
+ *   fichero fuente.
+ * - `filas`: las que quedan escritas en la tabla al terminar. Es menos que las
+ *   líneas cuando dos grafías normalizan igual, y más cuando una línea trae
+ *   varias grafías.
+ *
+ * Esto se carga una vez y a mano, así que ese par de números es la única
+ * comprobación que hay de que la carga salió bien; contar las filas antes de
+ * deduplicar daba un número que no cuadraba ni con el CSV ni con la tabla.
  */
 export async function cargarNiveles(
   db: Database,
   lineas: AsyncIterable<string>,
   opciones: { tamanoLote?: number } = {},
-): Promise<{ entradas: number }> {
+): Promise<{ entradas: number; filas: number }> {
   const tamanoLote = opciones.tamanoLote ?? TAMANO_LOTE;
 
   return db.transaction(async (tx) => {
@@ -45,19 +57,25 @@ export async function cargarNiveles(
           target: [cefrLevels.termNormalized, cefrLevels.pos],
           set: { term: sql`excluded.term`, level: sql`excluded.level` },
         });
-      entradas += lote.length;
       lote = [];
     };
 
     for await (const linea of lineas) {
       const filas = filasDeLineaMcer(linea);
       if (filas.length === 0) continue;
+      entradas += 1;
       lote.push(...filas);
       if (lote.length >= tamanoLote) await vaciarLote();
     }
     await vaciarLote();
 
-    return { entradas };
+    // Contado en la tabla, no sumando lotes: una misma clave repetida en dos
+    // lotes distintos se escribe una vez, y sumar los envíos la contaría dos.
+    const [{ total }] = await tx
+      .select({ total: sql<number>`count(*)::int` })
+      .from(cefrLevels);
+
+    return { entradas, filas: total };
   });
 }
 

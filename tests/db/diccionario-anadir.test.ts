@@ -43,6 +43,48 @@ describe("anadirDesdeDiccionario", () => {
     await close();
   });
 
+  /**
+   * Hallazgo de revisión: la extracción sin IA enseña la frase del libro en la
+   * pantalla y luego la tiraba, porque `anadirDesdeDiccionario` escribía
+   * siempre la glosa como contexto. En el repaso, `mostrarContexto` compara
+   * contexto y pista: si son la misma cadena, la tarjeta no enseña ninguna
+   * frase. El camino con IA sí la guarda; dos botones de la misma pantalla
+   * daban tarjetas distintas.
+   */
+  it("guarda la frase del libro como contexto cuando se la dan", async () => {
+    const { db, close } = await createTestDb();
+    await anadirDesdeDiccionario(db, {
+      ...orilla,
+      context: "We sat on the bank and watched the boats.",
+    });
+
+    const [aparicion] = await db.select().from(termOccurrences);
+    expect(aparicion.context).toBe("We sat on the bank and watched the boats.");
+    await close();
+  });
+
+  /**
+   * El camino de la pantalla del diccionario no cambia: ahí no hay libro
+   * detrás, y el contexto más honesto sigue siendo el significado en inglés.
+   */
+  it("sin frase sigue guardando la glosa: en el diccionario no hay libro detrás", async () => {
+    const { db, close } = await createTestDb();
+    await anadirDesdeDiccionario(db, orilla);
+
+    const [aparicion] = await db.select().from(termOccurrences);
+    expect(aparicion.context).toBe("An edge of a river.");
+    await close();
+  });
+
+  it("una frase en blanco no gana a la glosa: dejaría el contexto vacío", async () => {
+    const { db, close } = await createTestDb();
+    await anadirDesdeDiccionario(db, { ...orilla, context: "   " });
+
+    const [aparicion] = await db.select().from(termOccurrences);
+    expect(aparicion.context).toBe("An edge of a river.");
+    await close();
+  });
+
   it("cuelga las palabras de una única fuente 'Diccionario'", async () => {
     const { db, close } = await createTestDb();
     await anadirDesdeDiccionario(db, orilla);

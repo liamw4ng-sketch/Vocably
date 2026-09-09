@@ -154,6 +154,11 @@ que hace falta (`POST /api/terms`, vía `anadirDesdeDiccionario`). Así la
 biblioteca puede filtrar entre lo buscado a mano y lo extraído de un PDF, sin
 tener que tocar el esquema de `sources` para distinguirlos.
 
+Solo lo buscado a mano. Extraer sin IA pasa por la misma función, pero manda
+el título y el rango de páginas que eligió el usuario y abre **su propia
+fuente**, como hace la extracción con IA: colgarlo del "Diccionario" borraría
+justamente la distinción que esa fuente existe para mantener.
+
 ### El traductor
 
 El diccionario en sí (ver "Cargar el diccionario" más abajo) trae español en

@@ -92,6 +92,41 @@ describe("buscarSugerencias", () => {
     await close();
   });
 
+  /**
+   * Hallazgo de revisión: la pantalla guardaba como reverso los significados de
+   * la palabra unidos con comas, que son definiciones enteras del Wikcionario
+   * español. El escalón bueno es el español **de la acepción**
+   * (`dictionary_entries.translations`, el que llenan el volcado inglés y
+   * "Afinar con IA"), y no llegaba a la pantalla porque no se pedía.
+   */
+  it("trae el español de la acepción, que es el primer escalón del reverso", async () => {
+    const { db, close } = await createTestDb();
+    await cargarNiveles(db, lineasDe("abandon,verb,B2,,,"));
+    await db.insert(dictionaryEntries).values({
+      termNormalized: "abandon",
+      term: "abandon",
+      pos: "verb",
+      gloss: "To leave behind.",
+      example: null,
+      translations: ["abandonar", "dejar"],
+    });
+
+    const s = await buscarSugerencias(db, [candidata("abandon")], "B2");
+
+    expect(s[0].traducciones).toEqual(["abandonar", "dejar"]);
+    await close();
+  });
+
+  it("una acepción sin español propio trae la lista vacía, no un hueco", async () => {
+    const { db, close } = await createTestDb();
+    await baseConDiccionario(db);
+
+    const s = await buscarSugerencias(db, [candidata("abandon")], "B2");
+
+    expect(s[0].traducciones).toEqual([]);
+    await close();
+  });
+
   it("trae los significados en español de la palabra", async () => {
     const { db, close } = await createTestDb();
     await baseConDiccionario(db);

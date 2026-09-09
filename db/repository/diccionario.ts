@@ -128,11 +128,73 @@ export async function buscarEnBiblioteca(
 /** Título de la fuente a la que se cuelga todo lo buscado a mano en el diccionario. */
 export const FUENTE_DICCIONARIO = "Diccionario";
 
+/** Lo que hace falta para abrir la fuente de una extracción sin IA. */
+export type FuenteDeExtraccion = {
+  title: string;
+  pageStart: number;
+  pageEnd: number;
+  /** El suelo que eligió el usuario para el filtro; es el nivel de la extracción. */
+  level: string;
+};
+
+/**
+ * La fuente "Diccionario", creada la primera vez que hace falta. Va dentro de
+ * la transacción de quien la pide, para que un término y su fuente aparezcan
+ * juntos o no aparezcan.
+ */
+async function idDeLaFuenteDiccionario(
+  tx: Parameters<Parameters<Database["transaction"]>[0]>[0],
+  level: string,
+): Promise<number> {
+  const existentes = await tx
+    .select({ id: sources.id })
+    .from(sources)
+    .where(eq(sources.title, FUENTE_DICCIONARIO))
+    .limit(1);
+  if (existentes[0]) return existentes[0].id;
+
+  const [creada] = await tx
+    .insert(sources)
+    .values({ title: FUENTE_DICCIONARIO, pageStart: 0, pageEnd: 0, level })
+    .returning({ id: sources.id });
+  return creada.id;
+}
+
+/**
+ * Abre la fuente de una extracción sin IA: **una por extracción**, con el
+ * título y el rango de páginas que eligió el usuario, y coste 0.
+ *
+ * Sigue la forma del camino con IA (`saveExtraction`), que también crea una
+ * fuente nueva por cada extracción aunque el libro se repita: para el usuario,
+ * extraer dos veces el mismo libro son dos fuentes. Lo que **no** puede hacer
+ * es reutilizar `FUENTE_DICCIONARIO`, que existe justamente para separar lo
+ * buscado a mano de lo salido de un PDF.
+ */
+export async function abrirFuenteDeExtraccion(
+  db: Database,
+  fuente: FuenteDeExtraccion,
+): Promise<number> {
+  const [creada] = await db
+    .insert(sources)
+    .values({
+      title: fuente.title.trim(),
+      pageStart: fuente.pageStart,
+      pageEnd: fuente.pageEnd,
+      level: fuente.level,
+    })
+    .returning({ id: sources.id });
+  return creada.id;
+}
+
 /**
  * Añade a la biblioteca una acepción encontrada en el diccionario de consulta.
- * Todo lo buscado a mano cuelga de una única fuente "Diccionario", con 0
- * páginas y coste 0, para que la biblioteca pueda distinguir lo que se buscó
- * de lo que salió de un PDF.
+ *
+ * Sin `sourceId`, todo cuelga de una única fuente "Diccionario", con 0 páginas
+ * y coste 0, para que la biblioteca pueda distinguir lo que se buscó a mano de
+ * lo que salió de un PDF. **Con `sourceId`** —el de `abrirFuenteDeExtraccion`—
+ * la palabra cuelga de la fuente de esa extracción: la extracción sin IA pasa
+ * por aquí, y colgarla del "Diccionario" borraba justamente la distinción que
+ * esa fuente existe para mantener.
  *
  * La clave de deduplicación es la pareja (término normalizado, pista): dos
  * acepciones distintas del mismo término ("bank" = orilla, "bank" = banco)
@@ -147,28 +209,17 @@ export async function anadirDesdeDiccionario(
     example: string | null;
     translation: string;
     level: string;
+    /**
+     * La frase del libro en que apareció la palabra, cuando hay libro detrás.
+     * Es el contexto de la tarjeta y lo que el usuario pidió expresamente:
+     * "coger la palabra y el contexto en el que se ha encontrado".
+     */
+    context?: string;
   },
+  sourceId?: number,
 ): Promise<{ termId: number; created: boolean }> {
   return db.transaction(async (tx) => {
-    const existentes = await tx
-      .select({ id: sources.id })
-      .from(sources)
-      .where(eq(sources.title, FUENTE_DICCIONARIO))
-      .limit(1);
-
-    const sourceId =
-      existentes[0]?.id ??
-      (
-        await tx
-          .insert(sources)
-          .values({
-            title: FUENTE_DICCIONARIO,
-            pageStart: 0,
-            pageEnd: 0,
-            level: entrada.level,
-          })
-          .returning({ id: sources.id })
-      )[0].id;
+    const idDeLaFuente = sourceId ?? (await idDeLaFuenteDiccionario(tx, entrada.level));
 
     const clave = normalizeTerm(entrada.term);
     const yaEsta = await tx
@@ -194,10 +245,14 @@ export async function anadirDesdeDiccionario(
     await tx.insert(cardStates).values({ termId: creado.id });
     await tx.insert(termOccurrences).values({
       termId: creado.id,
-      sourceId,
-      // El diccionario no da la frase en que se encontró la palabra: no hay
-      // libro detrás. El significado en inglés es el contexto más honesto.
-      context: entrada.gloss,
+      sourceId: idDeLaFuente,
+      // La frase del libro cuando la hay —la extracción sin IA la trae, y es el
+      // contexto que se enseña en el repaso—. Buscando en el diccionario no la
+      // hay: no hay libro detrás, y ahí el significado en inglés es el contexto
+      // más honesto. Sin este escalón, la frase se enseñaba en la pantalla de
+      // extraer y se tiraba al guardar, y la tarjeta salía sin contexto porque
+      // `mostrarContexto` calla lo que es igual que la pista.
+      context: entrada.context?.trim() || entrada.gloss,
       example: entrada.example ?? "",
     });
 
@@ -217,6 +272,11 @@ export async function anadirDesdeDiccionario(
  * carácter que Postgres rechaza en un campo de texto), su transacción se
  * deshace sola, la entrada se cuenta como fallida, y el bucle sigue con la
  * siguiente.
+ *
+ * Con `fuente` —lo que manda la extracción sin IA— las palabras del lote
+ * cuelgan todas de **la misma fuente nueva**, abierta una sola vez antes del
+ * bucle. Sin ella, cada una cuelga de "Diccionario", que es el camino de la
+ * pantalla del diccionario y no cambia.
  */
 export async function anadirVariasDesdeDiccionario(
   db: Database,
@@ -227,14 +287,20 @@ export async function anadirVariasDesdeDiccionario(
     example: string | null;
     translation: string;
     level: string;
+    context?: string;
   }>,
+  fuente?: FuenteDeExtraccion,
 ): Promise<{ creadas: number; repetidas: number; fallidas: number }> {
   let creadas = 0;
   let repetidas = 0;
   let fallidas = 0;
+  // Sin nada que guardar no se abre ninguna fuente: dejaría en la biblioteca un
+  // filtro por una fuente sin una sola palabra dentro.
+  const sourceId =
+    fuente && entradas.length > 0 ? await abrirFuenteDeExtraccion(db, fuente) : undefined;
   for (const entrada of entradas) {
     try {
-      const { created } = await anadirDesdeDiccionario(db, entrada);
+      const { created } = await anadirDesdeDiccionario(db, entrada, sourceId);
       if (created) creadas += 1;
       else repetidas += 1;
     } catch {

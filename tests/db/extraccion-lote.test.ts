@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createTestDb } from "@/tests/helpers/test-db";
-import { anadirVariasDesdeDiccionario } from "@/db/repository/diccionario";
-import { terms, cardStates } from "@/db/schema";
+import { anadirVariasDesdeDiccionario, FUENTE_DICCIONARIO } from "@/db/repository/diccionario";
+import { terms, cardStates, sources, termOccurrences } from "@/db/schema";
 
 const entrada = (term: string, gloss: string) => ({
   term, pos: "noun", gloss, example: null, translation: "algo", level: "B2",
@@ -41,6 +41,73 @@ describe("anadirVariasDesdeDiccionario", () => {
 
     expect(r).toEqual({ creadas: 1, repetidas: 1, fallidas: 0 });
     expect(await db.select().from(terms)).toHaveLength(2);
+    await close();
+  });
+
+  /**
+   * Hallazgo de revisión: todo lo extraído sin IA colgaba de la fuente
+   * "Diccionario", que existe justamente para distinguir lo buscado a mano de
+   * lo salido de un PDF. Con la rama entera dentro, el filtro por fuente de la
+   * biblioteca mezclaba las dos cosas. Una extracción tiene su fuente propia,
+   * con el título y el rango que eligió el usuario, como en el camino con IA.
+   */
+  it("una extracción cuelga de su fuente propia, con título y rango", async () => {
+    const { db, close } = await createTestDb();
+
+    await anadirVariasDesdeDiccionario(db, [entrada("dog", "An animal.")], {
+      title: "Drácula",
+      pageStart: 10,
+      pageEnd: 14,
+      level: "B2",
+    });
+
+    const fuentes = await db.select().from(sources);
+    expect(fuentes).toHaveLength(1);
+    expect(fuentes[0].title).toBe("Drácula");
+    expect(fuentes[0].pageStart).toBe(10);
+    expect(fuentes[0].pageEnd).toBe(14);
+    expect(fuentes[0].costUsd).toBe(0);
+    await close();
+  });
+
+  it("todas las palabras del lote cuelgan de la misma fuente, no de una cada una", async () => {
+    const { db, close } = await createTestDb();
+
+    await anadirVariasDesdeDiccionario(
+      db,
+      [entrada("dog", "An animal."), entrada("cat", "Another animal.")],
+      { title: "Drácula", pageStart: 10, pageEnd: 14, level: "B2" },
+    );
+
+    expect(await db.select().from(sources)).toHaveLength(1);
+    const apariciones = await db.select().from(termOccurrences);
+    expect(apariciones).toHaveLength(2);
+    expect(new Set(apariciones.map((a) => a.sourceId)).size).toBe(1);
+    await close();
+  });
+
+  /** El camino de la pantalla del diccionario, sin fuente, no cambia. */
+  it("sin fuente sigue colgando de 'Diccionario'", async () => {
+    const { db, close } = await createTestDb();
+    await anadirVariasDesdeDiccionario(db, [entrada("dog", "An animal.")]);
+
+    const fuentes = await db.select().from(sources);
+    expect(fuentes).toHaveLength(1);
+    expect(fuentes[0].title).toBe(FUENTE_DICCIONARIO);
+    await close();
+  });
+
+  it("guarda la frase del libro de cada entrada como su contexto", async () => {
+    const { db, close } = await createTestDb();
+
+    await anadirVariasDesdeDiccionario(
+      db,
+      [{ ...entrada("dog", "An animal."), context: "The dog barked all night." }],
+      { title: "Drácula", pageStart: 10, pageEnd: 14, level: "B2" },
+    );
+
+    const [aparicion] = await db.select().from(termOccurrences);
+    expect(aparicion.context).toBe("The dog barked all night.");
     await close();
   });
 

@@ -4,7 +4,14 @@ export const MAXIMO_PALABRAS = 3;
 export type Candidata = {
   /** El texto normalizado con el que se consultará el diccionario. */
   texto: string;
-  /** La frase del libro en que apareció. Es el contexto de la tarjeta. */
+  /**
+   * La frase del libro en que apareció. Es el contexto de la tarjeta, y lo dice
+   * literal: viaja con la sugerencia hasta la pantalla, de ahí a
+   * `POST /api/terms` y de ahí a `term_occurrences.context`, que es lo que
+   * enseña el repaso debajo de la palabra. Durante un tiempo esto fue una
+   * intención y no un hecho —se enseñaba la frase y se guardaba la glosa
+   * inglesa—, y la tarjeta salía sin contexto ninguno.
+   */
   frase: string;
 };
 

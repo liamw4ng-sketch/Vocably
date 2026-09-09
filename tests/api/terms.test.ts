@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
 import { listTerms } from "@/db/repository/terms";
-import { terms } from "@/db/schema";
+import { terms, sources, termOccurrences } from "@/db/schema";
 
 let testDb: TestDb;
 let closeDb: () => Promise<void>;
@@ -390,6 +390,114 @@ describe("POST /api/terms", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ creadas: 2, repetidas: 0, fallidas: 1 });
+  });
+
+  /**
+   * Hallazgo de revisión: la misma ruta tenía dos contratos. El camino de una
+   * entrada exige no vacío y recorta; el del lote solo comprobaba que fuera una
+   * cadena, así que `translation: ""` pasaba y creaba justo la tarjeta con el
+   * reverso en blanco que la garantía del cliente iba a evitar.
+   */
+  it("en el lote, una traducción vacía no se guarda", async () => {
+    const res = await POST(
+      postRequest({
+        entradas: [
+          { term: "dog", pos: "noun", gloss: "An animal.", example: null, translation: "   ", level: "B1" },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await listTerms(testDb, {})).toHaveLength(0);
+  });
+
+  it("en el lote, una entrada incompleta se cae sola sin arrastrar a las buenas", async () => {
+    const res = await POST(
+      postRequest({
+        entradas: [
+          { term: "dog", pos: "noun", gloss: "An animal.", example: null, translation: "perro", level: "B1" },
+          { term: "  ", pos: "noun", gloss: "Sin término.", example: null, translation: "nada", level: "B1" },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ creadas: 1, repetidas: 0, fallidas: 0 });
+  });
+
+  /**
+   * Mismo motivo que en el camino de una entrada: `tipoDeTermino` compara `pos`
+   * con "verb" tal cual, así que un "verb " con un espacio de más clasificaría
+   * el verbo frasal como expresión.
+   */
+  it("en el lote, un pos con espacios sobrantes sigue clasificando el frasal como tal", async () => {
+    const res = await POST(
+      postRequest({
+        entradas: [
+          {
+            term: " put up with ",
+            pos: " verb ",
+            gloss: " To tolerate. ",
+            example: null,
+            translation: " aguantar ",
+            level: "B2",
+          },
+        ],
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const [row] = await listTerms(testDb, {});
+    expect(row.type).toBe("phrasal_verb");
+    expect(row.term).toBe("put up with");
+    expect(row.translation).toBe("aguantar");
+  });
+
+  /**
+   * Hallazgos de revisión 3 y 4: la frase del libro se enseñaba y se tiraba, y
+   * todo lo extraído sin IA colgaba de la fuente "Diccionario". La pantalla
+   * manda ahora la frase de cada palabra y el título y el rango de páginas.
+   */
+  it("un lote con fuente crea su propia fuente y guarda la frase del libro", async () => {
+    const res = await POST(
+      postRequest({
+        entradas: [
+          {
+            term: "dog",
+            pos: "noun",
+            gloss: "An animal.",
+            example: null,
+            translation: "perro",
+            level: "B1",
+            context: "The dog barked all night.",
+          },
+        ],
+        fuente: { title: "Drácula", pageStart: 10, pageEnd: 14, level: "B2" },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const fuentes = await testDb.select().from(sources);
+    expect(fuentes).toHaveLength(1);
+    expect(fuentes[0].title).toBe("Drácula");
+    expect(fuentes[0].pageStart).toBe(10);
+    expect(fuentes[0].pageEnd).toBe(14);
+    const [aparicion] = await testDb.select().from(termOccurrences);
+    expect(aparicion.context).toBe("The dog barked all night.");
+  });
+
+  it("una fuente con un rango imposible se rechaza en vez de guardarse torcida", async () => {
+    const res = await POST(
+      postRequest({
+        entradas: [
+          { term: "dog", pos: "noun", gloss: "An animal.", example: null, translation: "perro", level: "B1" },
+        ],
+        fuente: { title: "Drácula", pageStart: 14, pageEnd: 10, level: "B2" },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await listTerms(testDb, {})).toHaveLength(0);
   });
 
   /**

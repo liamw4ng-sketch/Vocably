@@ -35,9 +35,16 @@ async function main() {
   }
 
   const inicio = Date.now();
-  const { entradas } = await cargarNiveles(getDb(), lineasDeFichero(ruta));
+  const { entradas, filas } = await cargarNiveles(getDb(), lineasDeFichero(ruta));
   const segundos = Math.round((Date.now() - inicio) / 1000);
-  console.log(`Cargadas ${entradas} entradas en ${segundos} s.`);
+  // Los dos números, porque comparar la carga con el fichero fuente es la única
+  // comprobación que hay de que salió bien y no son el mismo: `entradas` se
+  // compara con las líneas del CSV; `filas`, con lo que quedó en la tabla.
+  // Difieren a propósito: hay líneas con dos grafías, y grafías que normalizan
+  // igual y se funden en una fila.
+  console.log(
+    `Cargadas ${entradas} líneas del listado en ${segundos} s; ${filas} filas en la tabla.`,
+  );
 }
 
 main().catch((error) => {
