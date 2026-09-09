@@ -173,4 +173,78 @@ describe("cargarEspanol", () => {
     ]);
     await close();
   });
+
+  /**
+   * Caso medido en producción: cargando el volcado real, `lord`/`noun`
+   * terminó con 1 significado de 7 posibles. La causa no es un corte de lote
+   * a mitad de clave (eso ya está cubierto arriba) sino que la misma clave
+   * `(termNormalized, pos)` aparece **dos veces separadas** por otras
+   * entradas distintas, así que cada aparición cae en un lote distinto. Cada
+   * lote hace su propio `INSERT ... ON CONFLICT DO UPDATE`, y hasta ahora ese
+   * `ON CONFLICT` hacía `meanings = excluded.meanings`: la segunda aparición
+   * pisaba en silencio a la primera. `fusionarLote` no puede evitarlo porque
+   * cada llamada solo ve las filas de su propio lote.
+   */
+  it("dos apariciones de la misma clave separadas por otras entradas, en lotes distintos, se fusionan y no se pisan", async () => {
+    const { db, close } = await createTestDb();
+    const frog1 = JSON.stringify({ w: "frog", p: "noun", s: ["Rana.", "Ranilla."] });
+    const cat = JSON.stringify({ w: "cat", p: "noun", s: ["Gato."] });
+    const dog = JSON.stringify({ w: "dog", p: "noun", s: ["Perro."] });
+    // Repite "Rana." para comprobar que también se deduplica entre lotes.
+    const frog2 = JSON.stringify({ w: "frog", p: "noun", s: ["Rana.", "Camino, calle, carretera."] });
+
+    // tamanoLote 2: con estas cuatro líneas de claves todas distintas entre sí
+    // salvo frog1/frog2, el corte cae así: lote 1 = [frog1, cat], lote 2 =
+    // [dog, frog2]. frog1 y frog2 quedan en INSERTs distintos, con "cat" y
+    // "dog" de por medio: exactamente el patrón no contiguo del volcado real.
+    const resultado = await cargarEspanol(db, lineasDe(frog1, cat, dog, frog2), { tamanoLote: 2 });
+
+    // Cada lote fusiona y cuenta sus propias claves (frog+cat, luego dog+frog):
+    // el mismo "frog" se cuenta en los dos lotes porque cada INSERT no sabe
+    // del otro. Lo que importa aquí es que la fila final no pierda nada.
+    expect(resultado).toEqual({ entradas: 4 });
+
+    const filas = await db.select().from(spanishMeanings);
+    expect(filas).toHaveLength(3);
+    const frog = filas.find((f) => f.term === "frog");
+    expect(frog?.meanings).toEqual(["Rana.", "Ranilla.", "Camino, calle, carretera."]);
+    await close();
+  });
+
+  it("recorta a MAXIMO_SIGNIFICADOS_GUARDADOS después de fusionar entre lotes distintos", async () => {
+    const { db, close } = await createTestDb();
+    const frog1 = JSON.stringify({
+      w: "frog",
+      p: "noun",
+      s: ["Significado 1.", "Significado 2.", "Significado 3.", "Significado 4.", "Significado 5."],
+    });
+    const cat = JSON.stringify({ w: "cat", p: "noun", s: ["Gato."] });
+    const dog = JSON.stringify({ w: "dog", p: "noun", s: ["Perro."] });
+    const frog2 = JSON.stringify({
+      w: "frog",
+      p: "noun",
+      s: ["Significado 6.", "Significado 7.", "Significado 8.", "Significado 9."],
+    });
+
+    // Mismo reparto de lotes que la prueba anterior: frog1 en el lote 1,
+    // frog2 en el lote 2. Entre los dos suman 9 significados; el recorte a
+    // MAXIMO_SIGNIFICADOS_GUARDADOS (8) solo puede pasar al fusionar en el
+    // `ON CONFLICT`, porque ningún lote por separado llega a 9.
+    await cargarEspanol(db, lineasDe(frog1, cat, dog, frog2), { tamanoLote: 2 });
+
+    const filas = await db.select().from(spanishMeanings);
+    const frog = filas.find((f) => f.term === "frog");
+    expect(frog?.meanings).toHaveLength(MAXIMO_SIGNIFICADOS_GUARDADOS);
+    expect(frog?.meanings).toEqual([
+      "Significado 1.",
+      "Significado 2.",
+      "Significado 3.",
+      "Significado 4.",
+      "Significado 5.",
+      "Significado 6.",
+      "Significado 7.",
+      "Significado 8.",
+    ]);
+    await close();
+  });
 });

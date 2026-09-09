@@ -41,15 +41,16 @@ function claveDeFila(fila: FilaEspanola): string {
  * antes, o se perdería significado de las últimas etimologías sin necesidad).
  * El `term` que se guarda es el de la primera aparición.
  *
- * Hace falta además por una razón puramente técnica: dos filas con la misma
- * clave en el mismo `INSERT ... VALUES` hacen que `ON CONFLICT DO UPDATE`
- * falle con "cannot affect row a second time". Que todas las filas de una
- * misma clave lleguen siempre al mismo lote —y por tanto a la misma llamada
- * de esta función— es responsabilidad de `cargarEspanol`, que no corta un
- * lote a mitad de una clave repetida (ver el bucle de más abajo): si lo
- * hiciera, la segunda mitad llegaría en su propio `INSERT` y su
- * `ON CONFLICT DO UPDATE` pisaría en silencio, con `meanings =
- * excluded.meanings`, lo que la primera mitad ya había fusionado.
+ * También evita, de paso, que dos filas con la misma clave lleguen en el
+ * mismo `INSERT ... VALUES`: eso hace fallar `ON CONFLICT DO UPDATE` con
+ * "cannot affect row a second time". Pero esta función **no es** lo que
+ * garantiza que la fusión sea correcta entre lotes distintos — eso lo hace
+ * ahora el propio `ON CONFLICT DO UPDATE` de `cargarEspanol`, fusionando en
+ * SQL contra la fila que ya hubiera en la base. `fusionarLote` solo reduce
+ * cuántas veces se fusiona la misma clave dentro de una carga, para ahorrar
+ * trabajo; si se quitara del todo, el resultado final seguiría siendo
+ * correcto, solo que con más filas fusionándose una a una en el `ON
+ * CONFLICT` en vez de en memoria.
  */
 function fusionarLote(lote: FilaEspanola[]): FilaEspanola[] {
   const primeraFilaPorClave = new Map<string, FilaEspanola>();
@@ -76,6 +77,56 @@ function fusionarLote(lote: FilaEspanola[]): FilaEspanola[] {
 }
 
 /**
+ * La misma clave `(termNormalized, pos)` puede aparecer en dos lotes
+ * distintos y no contiguos: el volcado viene ordenado, pero eso no impide que
+ * dos apariciones de la misma clave —típicamente por mayúsculas que
+ * normalizan igual, p. ej. "Lord" y "lord"— queden separadas por otras
+ * entradas distintas en medio. Medido sobre el fichero real: 25 significados
+ * perdidos en 10 claves, todas por esta razón (`lord`/noun tenía 1 de 7,
+ * `roman`/noun 1 de 5, etc.).
+ *
+ * `fusionarLote` no puede arreglar eso: cada llamada solo ve las filas de su
+ * propio lote. Si el `ON CONFLICT` hiciera `meanings = excluded.meanings`
+ * (sustituir), la segunda aparición pisaría en silencio a la primera. Así que
+ * la fusión pasa a hacerse aquí, en SQL, contra la fila que ya exista en la
+ * base — da igual en qué lote haya caído cada aparición.
+ *
+ * Esto solo se usa cuando la fila que entra ya chocó antes **dentro de esta
+ * misma carga** (ver `clavesEscritasEnEstaCarga` en `cargarEspanol`): si es
+ * la primera vez que esta clave aparece en la carga actual, lo que haya en la
+ * base es de una carga anterior del volcado y hay que sustituirlo entero, no
+ * fusionarlo — si no, una recarga nunca podría quitar un significado que
+ * Wikcionario haya corregido o borrado; se acumularía para siempre.
+ *
+ * El procedimiento, de dentro hacia fuera:
+ * 1. `unnest(... ) WITH ORDINALITY` deshace `meanings || excluded.meanings`
+ *    en filas (significado, posición), conservando la posición original.
+ * 2. `DISTINCT ON (significado) ... ORDER BY significado, orden` se queda con
+ *    una fila por significado exacto: la de menor `orden`, es decir, la
+ *    primera vez que apareció.
+ * 3. `array_agg(... ORDER BY orden)` vuelve a montar el array, pero ordenado
+ *    por `orden` y no por texto: así el resultado queda en el orden real de
+ *    aparición, no en orden alfabético.
+ * 4. `[1:MAXIMO_SIGNIFICADOS_GUARDADOS]` recorta **después** de fusionar.
+ *
+ * Ojo: `array_agg(DISTINCT significado)` a secas sería más corto, pero
+ * Postgres ordena esa forma alfabéticamente por el propio valor — destruiría
+ * el orden de los sentidos, que es justo lo que no se puede perder: los
+ * primeros significados son los sentidos más comunes, y son los que se
+ * enseñan primero en la aplicación.
+ */
+const FUSION_DE_SIGNIFICADOS = sql`(
+  (
+    select array_agg(fusion.significado order by fusion.orden)
+    from (
+      select distinct on (significado) significado, orden
+      from unnest(${spanishMeanings.meanings} || excluded.meanings) with ordinality as u(significado, orden)
+      order by significado, orden
+    ) as fusion
+  )
+)[1:${MAXIMO_SIGNIFICADOS_GUARDADOS}]`;
+
+/**
  * Carga el volcado español en `spanish_meanings`.
  *
  * **No vacía la tabla**, a diferencia de `cargarDiccionario`. En esta misma
@@ -94,21 +145,55 @@ export async function cargarEspanol(
   return db.transaction(async (tx) => {
     let entradas = 0;
     let lote: FilaEspanola[] = [];
+    // Claves que esta misma carga ya escribió en un lote anterior. Hace falta
+    // distinguirlas de las que no: si la clave es nueva en esta carga, lo que
+    // haya en la base (si hay algo) es de una carga anterior del volcado —el
+    // script de recarga no borra nada antes de llamar a `cargarEspanol`— y
+    // toca sustituirlo entero, para que una recarga pueda seguir corrigiendo
+    // o quitando significados que Wikcionario haya cambiado. Si la clave YA
+    // se escribió antes en esta misma carga, lo que haya en la base es la
+    // aparición anterior de la MISMA carga, y ahí sí toca fusionar.
+    const clavesEscritasEnEstaCarga = new Set<string>();
 
     const vaciarLote = async () => {
       if (lote.length === 0) return;
       const filasFusionadas = fusionarLote(lote);
-      await tx
-        .insert(spanishMeanings)
-        .values(filasFusionadas.map((fila) => ({ ...fila, source: ORIGEN_WIKCIONARIO_ES })))
-        .onConflictDoUpdate({
-          target: [spanishMeanings.termNormalized, spanishMeanings.pos],
-          set: {
-            term: sql`excluded.term`,
-            meanings: sql`excluded.meanings`,
-            source: sql`excluded.source`,
-          },
-        });
+      const filasNuevasEnEstaCarga = filasFusionadas.filter(
+        (fila) => !clavesEscritasEnEstaCarga.has(claveDeFila(fila)),
+      );
+      const filasRepetidasEnEstaCarga = filasFusionadas.filter((fila) =>
+        clavesEscritasEnEstaCarga.has(claveDeFila(fila)),
+      );
+
+      if (filasNuevasEnEstaCarga.length > 0) {
+        await tx
+          .insert(spanishMeanings)
+          .values(filasNuevasEnEstaCarga.map((fila) => ({ ...fila, source: ORIGEN_WIKCIONARIO_ES })))
+          .onConflictDoUpdate({
+            target: [spanishMeanings.termNormalized, spanishMeanings.pos],
+            set: {
+              term: sql`excluded.term`,
+              meanings: sql`excluded.meanings`,
+              source: sql`excluded.source`,
+            },
+          });
+      }
+
+      if (filasRepetidasEnEstaCarga.length > 0) {
+        await tx
+          .insert(spanishMeanings)
+          .values(filasRepetidasEnEstaCarga.map((fila) => ({ ...fila, source: ORIGEN_WIKCIONARIO_ES })))
+          .onConflictDoUpdate({
+            target: [spanishMeanings.termNormalized, spanishMeanings.pos],
+            set: {
+              term: sql`excluded.term`,
+              meanings: FUSION_DE_SIGNIFICADOS,
+              source: sql`excluded.source`,
+            },
+          });
+      }
+
+      for (const fila of filasFusionadas) clavesEscritasEnEstaCarga.add(claveDeFila(fila));
       entradas += filasFusionadas.length;
       lote = [];
     };
@@ -118,8 +203,11 @@ export async function cargarEspanol(
       if (!fila) continue;
       // No cortar a mitad de una clave repetida: si el lote ya llegó al
       // tamaño pero esta fila comparte clave con la última que entró, se sigue
-      // acumulando. Cortar aquí partiría un grupo de etimologías entre dos
-      // lotes, y `fusionarLote` nunca llegaría a verlas juntas.
+      // acumulando. Esto ya NO es lo que garantiza la corrección — eso lo hace
+      // `FUSION_DE_SIGNIFICADOS` en el `ON CONFLICT`, da igual en qué lote
+      // caiga cada aparición — es solo para que `fusionarLote` pueda fundir en
+      // memoria las etimologías contiguas de una clave y ahorrar así un
+      // `ON CONFLICT` por cada una.
       const ultima = lote[lote.length - 1];
       if (lote.length >= tamanoLote && (!ultima || claveDeFila(fila) !== claveDeFila(ultima))) {
         await vaciarLote();
