@@ -69,7 +69,7 @@ describe("crearTraductorMyMemory", () => {
    * fuera el español de la palabra, y guardado en una tarjeta de repaso.
    */
   it("con la cuota agotada devuelve vacío, no el aviso del servicio", async () => {
-    const cuotaAgotada = {
+    const respuestaCuotaAgotada = {
       responseData: {
         translatedText:
           "MYMEMORY WARNING: YOU USED ALL AVAILABLE FREE TRANSLATIONS FOR TODAY. NEXT AVAILABLE IN 10 HOURS 26 MINUTES",
@@ -77,7 +77,7 @@ describe("crearTraductorMyMemory", () => {
       quotaFinished: true,
       responseStatus: 403,
     };
-    const fetchFalso = vi.fn(async () => new Response(JSON.stringify(cuotaAgotada)));
+    const fetchFalso = vi.fn(async () => new Response(JSON.stringify(respuestaCuotaAgotada)));
 
     expect(await crearTraductorMyMemory(fetchFalso as unknown as typeof fetch)("dog")).toEqual([]);
   });
