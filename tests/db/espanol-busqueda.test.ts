@@ -131,6 +131,32 @@ describe("completarConTraductor", () => {
   });
 
   /**
+   * Hallazgo F: las pruebas de arriba solo comprueban el objeto que devuelve
+   * la función, que es un literal aparte y no dice nada de lo que se escribió
+   * de verdad. El `pos: ""` de la fila guardada es lo que evita que una fila
+   * de MyMemory choque en el índice único con una de Wikcionario y le pise los
+   * significados: sin esta aserción, una mutación que cambiara ese `pos`
+   * pasaría toda la suite igual.
+   */
+  it("guarda la fila con pos vacío y origen mymemory, no solo la devuelve", async () => {
+    const { db, close } = await createTestDb();
+    const traductor = vi.fn(async () => ["rechazar", "denegar"]);
+
+    await completarConTraductor(db, "turn down", [], traductor);
+
+    const filas = await db.select().from(spanishMeanings);
+    expect(filas).toHaveLength(1);
+    expect(filas[0]).toMatchObject({
+      termNormalized: "turn down",
+      term: "turn down",
+      pos: "",
+      meanings: ["rechazar", "denegar"],
+      source: ORIGEN_MYMEMORY,
+    });
+    await close();
+  });
+
+  /**
    * El fallo que esto arregla. Antes solo se guardaba si a la palabra le
    * faltaba el español en **una única** acepción, cosa que casi nunca pasa: por
    * eso las 267.014 filas del diccionario tenían la fuente a nulo y cada

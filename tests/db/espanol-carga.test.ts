@@ -118,6 +118,32 @@ describe("cargarEspanol", () => {
     await close();
   });
 
+  /**
+   * Hallazgo D: el comentario de `fusionarLote` decía que "el volcado viene
+   * ordenado por palabra, así que las repeticiones caen siempre en el mismo
+   * lote", pero un corte de lote puede caer justo en medio de un grupo de
+   * etimologías repetidas. Cuando eso pasa, la segunda mitad llega en su
+   * propio `INSERT ... ON CONFLICT DO UPDATE` con `meanings = excluded.meanings`
+   * y pisa en silencio lo que la primera mitad ya había fusionado: se pierde
+   * "Rana." sin ningún aviso.
+   */
+  it("un corte de lote a mitad de una clave repetida no pierde los significados de la primera mitad", async () => {
+    const { db, close } = await createTestDb();
+    const relleno = JSON.stringify({ w: "cat", p: "noun", s: ["Gato."] });
+    const rana = JSON.stringify({ w: "frog", p: "noun", s: ["Rana."] });
+    const frances = JSON.stringify({ w: "frog", p: "noun", s: ["Francés."] });
+
+    // tamanoLote 2: sin el arreglo, el lote se cierra justo tras "relleno" +
+    // "rana" (ya son dos), y "francés" cae en el lote siguiente.
+    const resultado = await cargarEspanol(db, lineasDe(relleno, rana, frances), { tamanoLote: 2 });
+
+    expect(resultado).toEqual({ entradas: 2 });
+    const filas = await db.select().from(spanishMeanings);
+    const frog = filas.find((f) => f.term === "frog");
+    expect(frog?.meanings).toEqual(["Rana.", "Francés."]);
+    await close();
+  });
+
   it("recorta a MAXIMO_SIGNIFICADOS_GUARDADOS después de fusionar, no antes", async () => {
     const { db, close } = await createTestDb();
     const primeraMitad = JSON.stringify({

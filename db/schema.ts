@@ -128,7 +128,7 @@ export const dictionaryEntries = pgTable(
     gloss: text("gloss").notNull(),
     example: text("example"),
     translations: text("translations").array().notNull().default([]),
-    /** `wiktionary` | `mymemory` | `claude`. Nulo mientras no haya traducción. */
+    /** `wiktionary` | `claude`. Nulo mientras no haya traducción. */
     translationSource: text("translation_source"),
   },
   (table) => ({

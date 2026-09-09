@@ -8,10 +8,14 @@ import { getDb } from "@/db/client";
 
 /**
  * Los cuatro escalones de la búsqueda: la biblioteca, la tabla del
- * diccionario, los significados en español del Wikcionario y, si esos tres
- * gratuitos no dieron nada, el traductor gratuito. **No llama a Claude
- * nunca**: lo único que cuesta dinero vive en /api/diccionario/afinar,
- * aparte y a propósito.
+ * diccionario, los significados en español del Wikcionario y, si el término
+ * sí tiene alguna acepción en el diccionario inglés pero se quedó sin
+ * español, el traductor gratuito. Ese último escalón no se pisa si el
+ * término ni siquiera está en el diccionario inglés —una errata, por
+ * ejemplo—: gastar la cuota diaria en algo que no se puede estudiar no tiene
+ * sentido, y los verbos frasales (20.012 de ellos), que es la razón de que
+ * MyMemory siga en pie, sí están ahí. **No llama a Claude nunca**: lo único
+ * que cuesta dinero vive en /api/diccionario/afinar, aparte y a propósito.
  */
 export async function GET(request: Request) {
   const termino = (new URL(request.url).searchParams.get("q") ?? "").trim();
@@ -28,14 +32,15 @@ export async function GET(request: Request) {
     ]);
 
     // El último escalón gratuito, el que tiene cuota diaria: solo se pisa si
-    // los tres anteriores no dieron español. Aquí tampoco se gasta dinero —
-    // lo único que cuesta vive en /api/diccionario/afinar.
-    const conEspanol = await completarConTraductor(
-      db,
-      termino,
-      encontrados,
-      crearTraductorMyMemory(),
-    );
+    // el término tiene alguna acepción en el diccionario inglés y ninguno de
+    // los otros dos gratuitos dio ya español. Sin acepciones no hay nada que
+    // el usuario pueda añadir, así que consultar a MyMemory sería gastar
+    // cuota en una palabra que no está en el diccionario. Aquí tampoco se
+    // gasta dinero — lo único que cuesta vive en /api/diccionario/afinar.
+    const conEspanol =
+      acepciones.length > 0
+        ? await completarConTraductor(db, termino, encontrados, crearTraductorMyMemory())
+        : encontrados;
 
     // Una fila por palabra y categoría, así que cada grupo trae exactamente
     // una; se usa `agruparPorCategoria` por su orden, que es el mismo con el

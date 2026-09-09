@@ -18,6 +18,11 @@ export const ORIGEN_WIKCIONARIO_ES = "wikcionario-es";
 /** El traductor automático gratuito. */
 export const ORIGEN_MYMEMORY = "mymemory";
 
+/** La clave de fusión y de upsert: término normalizado + categoría. */
+function claveDeFila(fila: FilaEspanola): string {
+  return `${fila.termNormalized} ${fila.pos}`;
+}
+
 /**
  * Dentro de un mismo lote puede haber varias filas con la misma clave
  * `(termNormalized, pos)`. No son duplicados que se puedan descartar: el
@@ -38,8 +43,13 @@ export const ORIGEN_MYMEMORY = "mymemory";
  *
  * Hace falta además por una razón puramente técnica: dos filas con la misma
  * clave en el mismo `INSERT ... VALUES` hacen que `ON CONFLICT DO UPDATE`
- * falle con "cannot affect row a second time", y el volcado viene ordenado
- * por palabra, así que las repeticiones caen siempre en el mismo lote.
+ * falle con "cannot affect row a second time". Que todas las filas de una
+ * misma clave lleguen siempre al mismo lote —y por tanto a la misma llamada
+ * de esta función— es responsabilidad de `cargarEspanol`, que no corta un
+ * lote a mitad de una clave repetida (ver el bucle de más abajo): si lo
+ * hiciera, la segunda mitad llegaría en su propio `INSERT` y su
+ * `ON CONFLICT DO UPDATE` pisaría en silencio, con `meanings =
+ * excluded.meanings`, lo que la primera mitad ya había fusionado.
  */
 function fusionarLote(lote: FilaEspanola[]): FilaEspanola[] {
   const primeraFilaPorClave = new Map<string, FilaEspanola>();
@@ -47,7 +57,7 @@ function fusionarLote(lote: FilaEspanola[]): FilaEspanola[] {
   const clavesEnOrden: string[] = [];
 
   for (const fila of lote) {
-    const clave = `${fila.termNormalized} ${fila.pos}`;
+    const clave = claveDeFila(fila);
     if (!primeraFilaPorClave.has(clave)) {
       primeraFilaPorClave.set(clave, fila);
       significadosPorClave.set(clave, []);
@@ -106,8 +116,15 @@ export async function cargarEspanol(
     for await (const linea of lineas) {
       const fila = filaDeLineaEspanola(linea);
       if (!fila) continue;
+      // No cortar a mitad de una clave repetida: si el lote ya llegó al
+      // tamaño pero esta fila comparte clave con la última que entró, se sigue
+      // acumulando. Cortar aquí partiría un grupo de etimologías entre dos
+      // lotes, y `fusionarLote` nunca llegaría a verlas juntas.
+      const ultima = lote[lote.length - 1];
+      if (lote.length >= tamanoLote && (!ultima || claveDeFila(fila) !== claveDeFila(ultima))) {
+        await vaciarLote();
+      }
       lote.push(fila);
-      if (lote.length >= tamanoLote) await vaciarLote();
     }
     await vaciarLote();
 

@@ -125,7 +125,11 @@ describe("GET /api/diccionario", () => {
    */
   it("le pasa al traductor lo que ya se encontró, para que decida si hace falta", async () => {
     buscarEnBiblioteca.mockResolvedValue([]);
-    buscarEnDiccionario.mockResolvedValue([]);
+    // Con acepciones en el diccionario inglés: el término existe, así que el
+    // escalón del traductor sí se pisa (hallazgo C).
+    buscarEnDiccionario.mockResolvedValue([
+      { id: 1, term: "dog", pos: "noun", gloss: "A domesticated mammal.", example: null, translations: [] },
+    ]);
     const encontrados = [
       { term: "dog", pos: "noun", meanings: ["Perro."], source: "wikcionario-es" },
     ];
@@ -135,6 +139,36 @@ describe("GET /api/diccionario", () => {
 
     expect(completarConTraductor).toHaveBeenCalled();
     expect(completarConTraductor.mock.calls.at(-1)?.[2]).toEqual(encontrados);
+  });
+
+  /**
+   * Hallazgo C: antes `completarConTraductor` solo miraba `encontrados`, no
+   * `acepciones`, así que una errata («recieve») que no está en el diccionario
+   * inglés disparaba igualmente la petición a MyMemory, la guardaba con
+   * `source: "mymemory"` para siempre y no había forma de reintentarla. El
+   * escalón 4 ahora solo se pisa si el término tiene alguna acepción en el
+   * diccionario inglés.
+   */
+  it("sin acepciones en el diccionario inglés, no se llama al traductor", async () => {
+    buscarEnBiblioteca.mockResolvedValue([]);
+    buscarEnDiccionario.mockResolvedValue([]);
+    buscarSignificadosEspanoles.mockResolvedValue([]);
+
+    await pide("recieve");
+
+    expect(completarConTraductor).not.toHaveBeenCalled();
+  });
+
+  it("con acepciones en el diccionario inglés y sin español todavía, sí se llama al traductor", async () => {
+    buscarEnBiblioteca.mockResolvedValue([]);
+    buscarEnDiccionario.mockResolvedValue([
+      { id: 1, term: "turn down", pos: "verb", gloss: "To reject.", example: null, translations: [] },
+    ]);
+    buscarSignificadosEspanoles.mockResolvedValue([]);
+
+    await pide("turn down");
+
+    expect(completarConTraductor).toHaveBeenCalled();
   });
 
   it("sin español en ningún origen, la lista viene vacía en vez de faltar", async () => {

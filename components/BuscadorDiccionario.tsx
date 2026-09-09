@@ -162,13 +162,31 @@ export function significadosDeLaAcepcion(
  * añade salidas donde antes no había ninguna: sin él, una palabra cuyo español
  * solo esté a nivel de palabra no se podría añadir sin escribirlo a mano o
  * pagar por afinar.
+ *
+ * Del español de la palabra se guarda **solo el primero**. `deLaPalabra` son
+ * hasta cinco definiciones enteras del Wikcionario español, con su punto
+ * final y sus comas internas, no equivalentes cortos como los de
+ * `deLaAcepcion`: unirlas con `.join(", ")` dejaba reversos como
+ * "Idioma., Lengua, lenguaje., Léxico, jerga, vocabulario., …", que es
+ * justamente lo que el usuario tendría que estudiar durante meses.
  */
 export function traduccionParaGuardar(
   manual: string,
   deLaAcepcion: string[],
   deLaPalabra: string[],
 ): string {
-  return manual.trim() || deLaAcepcion.join(", ") || deLaPalabra.join(", ") || "";
+  return manual.trim() || deLaAcepcion.join(", ") || deLaPalabra[0] || "";
+}
+
+/**
+ * Si a esta acepción no le llegó español de ningún origen automático: ni el
+ * suyo propio (`dictionary_entries.translations`, el volcado inglés o afinar
+ * con IA) ni el de su palabra (`spanish_meanings`, Wikcionario o MyMemory).
+ * No mira lo escrito a mano: ese campo sigue disponible igual, y este aviso
+ * explica por qué hace falta antes de que el usuario lo rellene.
+ */
+export function sinEspanolEnNingunOrigen(deLaAcepcion: string[], deLaPalabra: string[]): boolean {
+  return deLaAcepcion.length === 0 && deLaPalabra.length === 0;
 }
 
 /**
@@ -405,8 +423,7 @@ export function BuscadorDiccionario() {
                 )}
                 <ol className="flex list-inside list-decimal flex-col gap-1">
                   {/* El índice como clave: es una lista estática que no se
-                      reordena ni se filtra, y el propio texto podría repetirse
-                      dentro de un mismo grupo tras el recorte a cinco. */}
+                      reordena ni se filtra. */}
                   {grupo.meanings.map((significado, indice) => (
                     <li key={indice}>{significado}</li>
                   ))}
@@ -465,6 +482,17 @@ export function BuscadorDiccionario() {
                       <p className="text-texto-suave">Ya está en tu repaso.</p>
                     ) : (
                       <>
+                        {/* Sin esto, una acepción sin español de ningún origen (ni el
+                            suyo propio ni el de su palabra) no diría nada: el usuario
+                            vería el término, el desplegable cerrado y el botón «Añadir»
+                            deshabilitado, sin explicación. No sale a la vez que el aviso
+                            de «no está en el diccionario»: ese solo aparece sin ninguna
+                            acepción, y este solo dentro de una. */}
+                        {sinEspanolEnNingunOrigen(acepcion.translations, deLaPalabra) && (
+                          <p className="text-texto-suave">
+                            Sin español en ningún origen. Escríbelo a mano o afina con IA.
+                          </p>
+                        )}
                         {/* Afinar solo se ofrece mientras la acepción no está guardada:
                             actualiza la caché del diccionario, no la ficha ya creada en
                             `terms`. Ofrecerlo después sería cobrar por un cambio que la
@@ -494,7 +522,7 @@ export function BuscadorDiccionario() {
                               [acepcion.id]: e.target.value,
                             }))
                           }
-                          ayuda="Si escribes algo aquí, se guarda esto en vez de la traducción de arriba."
+                          ayuda="Si escribes algo aquí, se guarda esto en vez de la traducción automática, venga de donde venga."
                         />
 
                         <div className="flex items-end gap-3">
