@@ -5,6 +5,7 @@ import {
   guardarMarcadas,
   nivelParaGuardar,
   pedirSugerencias,
+  sinTraduccionAlEspanol,
 } from "@/components/ExtraerSinIA";
 
 describe("etiquetaDeNivel", () => {
@@ -48,6 +49,23 @@ describe("avisoSinSugerencias", () => {
    */
   it("con texto pero sin sugerencias nuevas, avisa sin inventar la causa", () => {
     expect(avisoSinSugerencias(true, 0)).toBe("nada-nuevo");
+  });
+});
+
+/**
+ * Hallazgo de revisión: una sugerencia sin significados en español se
+ * guardaba con `translation: ""` — una tarjeta de repaso con el reverso en
+ * blanco, que no se puede estudiar. `BuscadorDiccionario.tsx` ya resuelve
+ * este caso con `sinEspanolEnNingunOrigen`; aquí es lo mismo, pero sobre las
+ * sugerencias de esta pantalla en vez de sobre una búsqueda.
+ */
+describe("sinTraduccionAlEspanol", () => {
+  it("una sugerencia sin significados no se puede marcar", () => {
+    expect(sinTraduccionAlEspanol([])).toBe(true);
+  });
+
+  it("una sugerencia con significados sí se puede marcar", () => {
+    expect(sinTraduccionAlEspanol(["perro"])).toBe(false);
   });
 });
 

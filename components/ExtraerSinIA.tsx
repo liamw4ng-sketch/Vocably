@@ -71,6 +71,18 @@ export function nivelParaGuardar(nivel: string | null, suelo: string): string {
 }
 
 /**
+ * Si a esta sugerencia no le llegó ningún significado en español. Guardarla
+ * así dejaría `translation: ""`: una tarjeta de repaso con el reverso en
+ * blanco, indistinguible de una completa en la lista, que solo se descubre
+ * vacía días después, en mitad de una sesión. Mismo caso que
+ * `sinEspanolEnNingunOrigen` en `BuscadorDiccionario.tsx`, aquí sobre los
+ * significados que ya trae la sugerencia en vez de sobre una búsqueda.
+ */
+export function sinTraduccionAlEspanol(significados: string[]): boolean {
+  return significados.length === 0;
+}
+
+/**
  * Por qué no hay nada que enseñar, que no es lo mismo según el caso. Un
  * resultado vacío sin explicación es lo que hace pensar que la herramienta está
  * rota.
@@ -320,34 +332,45 @@ export function ExtraerSinIA() {
       {sugerencias && sugerencias.length > 0 && (
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-3">
-            {sugerencias.map((s, indice) => (
-              <Tarjeta key={`${s.term}-${indice}`}>
-                <label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={marcadas.has(indice)}
-                    onChange={() => alternarMarcada(indice)}
-                    className="mt-1"
-                  />
-                  <div className="flex flex-col gap-2">
-                    <p>
-                      <strong>{s.term}</strong>
-                      {etiquetaDeTipo(s.tipo) && (
-                        <span style={TEXTO_1} className="text-texto-suave">
-                          {" "}
-                          · {etiquetaDeTipo(s.tipo)}
-                        </span>
+            {sugerencias.map((s, indice) => {
+              const sinTraduccion = sinTraduccionAlEspanol(s.significados);
+              return (
+                <Tarjeta key={`${s.term}-${indice}`}>
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={marcadas.has(indice)}
+                      onChange={() => alternarMarcada(indice)}
+                      disabled={sinTraduccion}
+                      className="mt-1"
+                    />
+                    <div className="flex flex-col gap-2">
+                      <p>
+                        <strong>{s.term}</strong>
+                        {etiquetaDeTipo(s.tipo) && (
+                          <span style={TEXTO_1} className="text-texto-suave">
+                            {" "}
+                            · {etiquetaDeTipo(s.tipo)}
+                          </span>
+                        )}
+                      </p>
+                      <p className="italic text-texto-suave">{s.frase}</p>
+                      {sinTraduccion ? (
+                        <p style={TEXTO_1} className="text-peligro">
+                          Sin traducción al español: no se puede guardar así. Búscala en el
+                          Diccionario, a mano o afinando con IA, y luego vuelve a intentarlo aquí.
+                        </p>
+                      ) : (
+                        <p>{s.significados.join(", ")}</p>
                       )}
-                    </p>
-                    <p className="italic text-texto-suave">{s.frase}</p>
-                    {s.significados.length > 0 && <p>{s.significados.join(", ")}</p>}
-                    <p style={TEXTO_1} className="text-texto-suave">
-                      {etiquetaDeNivel(s.nivel)}
-                    </p>
-                  </div>
-                </label>
-              </Tarjeta>
-            ))}
+                      <p style={TEXTO_1} className="text-texto-suave">
+                        {etiquetaDeNivel(s.nivel)}
+                      </p>
+                    </div>
+                  </label>
+                </Tarjeta>
+              );
+            })}
           </div>
 
           <Boton
