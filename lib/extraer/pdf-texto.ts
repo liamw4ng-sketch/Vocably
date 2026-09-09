@@ -12,8 +12,14 @@
  * la aplicación desde el icono del móvil; se pide la primera vez que se lee un
  * PDF y ya se queda.
  *
- * Solo lee PDFs **con texto dentro**. Un escaneo es una imagen y devolverá
- * cadena vacía; quien llame tiene que decírselo al usuario con esas palabras.
+ * Solo lee PDFs **con texto dentro**. Si el rango pedido no cabe en el PDF
+ * (la página `desde` no existe de verdad), esta función lanza un error
+ * diciendo cuántas páginas tiene el documento; así una cadena vacía en el
+ * resultado ya no puede deberse a eso. Lo que sí puede seguir dando cadena
+ * vacía, y son indistinguibles entre sí desde aquí, son dos causas legítimas:
+ * un escaneo (que es una imagen, sin capa de texto) o páginas que están
+ * genuinamente en blanco. Quien llame tiene que decírselo al usuario en esos
+ * términos generales, no como «parece un escaneo».
  */
 export async function textoDePaginas(
   bytes: Uint8Array,
@@ -45,15 +51,35 @@ export async function textoDePaginas(
     );
   }
 
+  if (desde > documento.numPages) {
+    throw new Error(
+      `El PDF tiene ${documento.numPages} páginas y has pedido desde la ${desde}.`,
+    );
+  }
+
   const trozos: string[] = [];
   const ultima = Math.min(hasta, documento.numPages);
   for (let pagina = desde; pagina <= ultima; pagina += 1) {
-    const contenido = await (await documento.getPage(pagina)).getTextContent();
-    trozos.push(
-      contenido.items
-        .map((item) => ("str" in item ? item.str : ""))
-        .join(" "),
-    );
+    // Un try/catch por página, no uno solo alrededor de todo el bucle: así el
+    // mensaje puede decir en qué página concreta falló sin necesitar una
+    // variable aparte para recordarla. Y es un catch distinto del de abrir el
+    // documento a propósito: un fallo aquí es de esta página en particular
+    // (p. ej. un flujo de contenido dañado), no de que el PDF entero esté
+    // cifrado o corrupto, así que merece su propio mensaje en vez de
+    // compartir uno que hablaría de "el PDF" en general.
+    try {
+      const contenido = await (await documento.getPage(pagina)).getTextContent();
+      trozos.push(
+        contenido.items
+          .map((item) => ("str" in item ? item.str : ""))
+          .join(" "),
+      );
+    } catch (error) {
+      const detalle = error instanceof Error ? error.message : "";
+      throw new Error(
+        `No se pudo leer la página ${pagina} del PDF.${detalle ? ` (${detalle})` : ""}`,
+      );
+    }
   }
 
   return trozos.join("\n");
