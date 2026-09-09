@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "cargar:diccionario": "tsx scripts/cargar-diccionario.ts",
-    "cargar:espanol": "tsx scripts/cargar-espanol.ts"
+    "cargar:espanol": "tsx scripts/cargar-espanol.ts",
+    "cargar:niveles": "tsx scripts/cargar-niveles.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",
