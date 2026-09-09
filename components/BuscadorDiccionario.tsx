@@ -404,8 +404,11 @@ export function BuscadorDiccionario() {
                   </p>
                 )}
                 <ol className="flex list-inside list-decimal flex-col gap-1">
-                  {grupo.meanings.map((significado) => (
-                    <li key={significado}>{significado}</li>
+                  {/* El índice como clave: es una lista estática que no se
+                      reordena ni se filtra, y el propio texto podría repetirse
+                      dentro de un mismo grupo tras el recorte a cinco. */}
+                  {grupo.meanings.map((significado, indice) => (
+                    <li key={indice}>{significado}</li>
                   ))}
                 </ol>
                 <p style={{ fontSize: "var(--tamano-1)" }} className="text-texto-suave">

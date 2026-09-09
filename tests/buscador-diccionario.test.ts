@@ -174,6 +174,22 @@ describe("significadosDeLaAcepcion", () => {
     expect(significadosDeLaAcepcion(significados, "adj")).toEqual([]);
     expect(significadosDeLaAcepcion([], "noun")).toEqual([]);
   });
+
+  /**
+   * Con las dos a la vez —su categoría y la vacía, con significados
+   * distintos— tiene que ganar la propia: la vacía es solo el recurso para
+   * cuando no hay nada más específico, no la primera opción. Una
+   * implementación que mirase primero el grupo vacío pasaría las otras tres
+   * pruebas igual (ninguna presenta ambos grupos a la vez) y solo esta la
+   * delata.
+   */
+  it("con su categoría y también un grupo sin categoría, gana el de su categoría", () => {
+    const conAmbos = [
+      { pos: "verb", nombre: "Verbo", meanings: ["Acosar."], source: "wikcionario-es" },
+      { pos: "", nombre: "", meanings: ["rechazar"], source: "mymemory" },
+    ];
+    expect(significadosDeLaAcepcion(conAmbos, "verb")).toEqual(["Acosar."]);
+  });
 });
 
 describe("traduccionParaGuardar", () => {
