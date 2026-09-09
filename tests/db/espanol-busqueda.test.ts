@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createTestDb } from "@/tests/helpers/test-db";
 import {
   buscarSignificadosEspanoles,
+  completarConTraductor,
   ORIGEN_MYMEMORY,
   ORIGEN_WIKCIONARIO_ES,
 } from "@/db/repository/espanol";
@@ -97,6 +98,89 @@ describe("buscarSignificadosEspanoles", () => {
     await buscarSignificadosEspanoles(db, "dog");
 
     expect(await db.select().from(spanishMeanings)).toHaveLength(2);
+    await close();
+  });
+});
+
+describe("completarConTraductor", () => {
+  it("no llama al traductor si ya hay significados", async () => {
+    const { db, close } = await createTestDb();
+    const encontrados = [
+      { term: "dog", pos: "noun", meanings: ["Perro."], source: ORIGEN_WIKCIONARIO_ES },
+    ];
+    const traductor = vi.fn(async () => ["perro"]);
+
+    const resultado = await completarConTraductor(db, "dog", encontrados, traductor);
+
+    expect(traductor).not.toHaveBeenCalled();
+    expect(resultado).toEqual(encontrados);
+    await close();
+  });
+
+  it("traduce lo que falta y lo devuelve como grupo sin categoría", async () => {
+    const { db, close } = await createTestDb();
+    const traductor = vi.fn(async () => ["rechazar", "denegar"]);
+
+    const resultado = await completarConTraductor(db, "turn down", [], traductor);
+
+    expect(traductor).toHaveBeenCalledExactlyOnceWith("turn down");
+    expect(resultado).toEqual([
+      { term: "turn down", pos: "", meanings: ["rechazar", "denegar"], source: ORIGEN_MYMEMORY },
+    ]);
+    await close();
+  });
+
+  /**
+   * El fallo que esto arregla. Antes solo se guardaba si a la palabra le
+   * faltaba el español en **una única** acepción, cosa que casi nunca pasa: por
+   * eso las 267.014 filas del diccionario tenían la fuente a nulo y cada
+   * búsqueda volvía a gastar cuota. Ahora el dato tiene su nivel y se guarda
+   * siempre.
+   */
+  it("guarda lo traducido: la segunda búsqueda ya no gasta cuota", async () => {
+    const { db, close } = await createTestDb();
+    const traductor = vi.fn(async () => ["rechazar"]);
+
+    await completarConTraductor(db, "turn down", [], traductor);
+    const segunda = await completarConTraductor(
+      db,
+      "turn down",
+      await buscarSignificadosEspanoles(db, "turn down"),
+      traductor,
+    );
+
+    expect(traductor).toHaveBeenCalledTimes(1);
+    expect(segunda[0].meanings).toEqual(["rechazar"]);
+    await close();
+  });
+
+  it("si el traductor no devuelve nada, no guarda nada y la palabra se queda sin español", async () => {
+    const { db, close } = await createTestDb();
+
+    const resultado = await completarConTraductor(db, "xyzzy", [], async () => []);
+
+    expect(resultado).toEqual([]);
+    expect(await db.select().from(spanishMeanings)).toHaveLength(0);
+    await close();
+  });
+
+  /**
+   * Guardar con la clave normalizada, no con lo que se escribió: si no, buscar
+   * "Turn Down" crearía una fila distinta y la cuota se gastaría dos veces.
+   */
+  it("guarda con la clave normalizada", async () => {
+    const { db, close } = await createTestDb();
+    const traductor = vi.fn(async () => ["rechazar"]);
+
+    await completarConTraductor(db, "  Turn   Down ", [], traductor);
+    await completarConTraductor(
+      db,
+      "turn down",
+      await buscarSignificadosEspanoles(db, "turn down"),
+      traductor,
+    );
+
+    expect(traductor).toHaveBeenCalledTimes(1);
     await close();
   });
 });

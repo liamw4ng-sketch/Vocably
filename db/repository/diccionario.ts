@@ -5,7 +5,6 @@ import { filasDeLinea, type FilaDiccionario } from "@/lib/diccionario/entrada";
 import { variantesDelLema } from "@/lib/diccionario/lema";
 import { normalizeTerm } from "@/lib/normalize";
 import { tipoDeTermino } from "@/lib/diccionario/tipo";
-import type { Traductor } from "@/lib/diccionario/traductor";
 
 /** 500 filas por INSERT: por encima, el número de parámetros incomoda al driver. */
 const TAMANO_LOTE = 500;
@@ -97,46 +96,6 @@ export async function buscarEnDiccionario(
     if (filas.length > 0) return filas;
   }
   return [];
-}
-
-/**
- * Rellena el español que falte y, cuando el dato es de verdad de esa acepción,
- * lo guarda. Todas las acepciones vienen de una misma búsqueda, así que
- * comparten término: se llama al traductor **una sola vez**.
- *
- * **Solo se cachea si hay exactamente una acepción sin español.** No es un
- * olvido, es la parte importante: el traductor recibe el término suelto —así
- * lo pide la especificación §8, porque mandarlo pegado a su definición rompe
- * la traducción— y su respuesta es la del término, no la de una acepción
- * concreta. Con varias acepciones sin español, escribir "banco" en las siete
- * entradas de *bank* dejaría la de orilla mal traducida y marcada como
- * cacheada, y una fila cacheada no se reintenta nunca: la única salida sería
- * el botón que cuesta dinero. Con una sola acepción no hay ambigüedad posible,
- * y ahí sí se guarda para no volver a preguntar. Mostrarlo sin guardarlo no
- * cuesta nada: MyMemory es gratis y se le puede volver a preguntar mañana.
- */
-export async function traducirSiFalta(
-  db: Database,
-  acepciones: AcepcionDiccionario[],
-  traductor: Traductor,
-): Promise<AcepcionDiccionario[]> {
-  const sinEspanol = acepciones.filter((a) => a.translations.length === 0);
-  if (sinEspanol.length === 0) return acepciones;
-
-  const traducciones = await traductor(sinEspanol[0].term);
-  if (traducciones.length === 0) return acepciones;
-
-  if (sinEspanol.length === 1) {
-    // Una sola escritura, no una por acepción.
-    await db
-      .update(dictionaryEntries)
-      .set({ translations: traducciones, translationSource: "mymemory" })
-      .where(eq(dictionaryEntries.id, sinEspanol[0].id));
-  }
-
-  return acepciones.map((a) =>
-    a.translations.length === 0 ? { ...a, translations: traducciones } : a,
-  );
 }
 
 /**

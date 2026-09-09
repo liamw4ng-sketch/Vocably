@@ -7,6 +7,8 @@ import {
   type FilaEspanola,
 } from "@/lib/diccionario/espanol";
 import { variantesDelLema } from "@/lib/diccionario/lema";
+import { normalizeTerm } from "@/lib/normalize";
+import type { Traductor } from "@/lib/diccionario/traductor";
 
 /** 500 filas por INSERT: por encima, el número de parámetros incomoda al driver. */
 const TAMANO_LOTE = 500;
@@ -151,4 +153,50 @@ export async function buscarSignificadosEspanoles(
     return deWikcionario.length > 0 ? deWikcionario : filas;
   }
   return [];
+}
+
+/**
+ * Si la palabra no tiene español, se lo pide al traductor gratuito y **lo
+ * guarda**.
+ *
+ * Aquí está el arreglo del caché roto. Antes esto vivía en `traducirSiFalta`,
+ * que escribía sobre `dictionary_entries` —una fila por acepción— y por eso
+ * solo se atrevía a guardar cuando había exactamente una acepción sin español:
+ * escribir "banco" en las siete entradas de *bank* habría dejado la de orilla
+ * mal traducida y marcada como buena para siempre. Con varias acepciones no
+ * guardaba nada, que es casi siempre, y cada búsqueda volvía a gastar cuota.
+ *
+ * No era un descuido: era el dato en el sitio equivocado. MyMemory contesta
+ * "qué significa esta palabra", y ahora eso tiene su propia fila. Se guarda
+ * siempre, sin falsear nada, y se pregunta una vez en la vida.
+ *
+ * La categoría queda vacía a propósito: el traductor no dice de cuál habla.
+ */
+export async function completarConTraductor(
+  db: Database,
+  termino: string,
+  encontrados: SignificadosDePalabra[],
+  traductor: Traductor,
+): Promise<SignificadosDePalabra[]> {
+  if (encontrados.length > 0) return encontrados;
+
+  const meanings = await traductor(termino.trim());
+  if (meanings.length === 0) return [];
+
+  const term = termino.trim();
+  await db
+    .insert(spanishMeanings)
+    .values({
+      termNormalized: normalizeTerm(term),
+      term,
+      pos: "",
+      meanings,
+      source: ORIGEN_MYMEMORY,
+    })
+    .onConflictDoUpdate({
+      target: [spanishMeanings.termNormalized, spanishMeanings.pos],
+      set: { meanings: sql`excluded.meanings`, source: sql`excluded.source` },
+    });
+
+  return [{ term, pos: "", meanings, source: ORIGEN_MYMEMORY }];
 }
