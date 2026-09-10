@@ -7,7 +7,7 @@ import { toFsrsCard, fromFsrsCard } from "@/lib/fsrs";
 import { inicioDelDia } from "@/lib/dia";
 import { formatearPlazo } from "@/lib/plazo";
 import { componerSesion, type Grupos, type VencidosFuera } from "@/lib/repaso/coleccion";
-import type { Modo } from "@/lib/ajustes";
+import { cupoDeNuevas, type Modo } from "@/lib/ajustes";
 
 const programador = fsrs();
 
@@ -177,9 +177,10 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
 
   // El tope es DIARIO: lo que queda de cupo es el tope menos lo que ya se ha
   // introducido hoy, no el tope entero en cada petición. Solo actúa cuando el
-  // usuario no ha pedido un tamaño de sesión; ver `componerSesion`.
+  // usuario no ha pedido un tamaño de sesión; ver `componerSesion`. Y viene
+  // apagado: `cupoDeNuevas` devuelve infinito mientras el tope valga 0.
   const { newCardsPerDay: tope, sessionSize, sessionMode } = await getAjustes(db);
-  const limiteNuevas = Math.max(0, tope - (await introducidasHoy(db, opts.now)));
+  const limiteNuevas = cupoDeNuevas(tope, await introducidasHoy(db, opts.now));
 
   // La más próxima primero: adelantar al azar traería lo mismo dos días
   // seguidos y dejaría lo de pasado mañana sin tocar.
@@ -307,7 +308,7 @@ export async function contarColecciones(db: Database, ahora: Date): Promise<Resu
   const nuevas = fila?.nuevas ?? 0;
   const enCurso = fila?.enCursoVencidas ?? 0;
   const tope = (await getAjustes(db)).newCardsPerDay;
-  const cupo = Math.max(0, tope - (await introducidasHoy(db, ahora)));
+  const cupo = cupoDeNuevas(tope, await introducidasHoy(db, ahora));
 
   return {
     hoy: {

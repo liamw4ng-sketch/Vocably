@@ -18,6 +18,8 @@ function grupos(parcial: Partial<Grupos<Carta>> = {}): Grupos<Carta> {
 }
 
 const ids = (cartas: Carta[]) => cartas.map((c) => c.id);
+/** Para lo que importa QUÉ cartas entran, no en qué orden: ahora se barajan. */
+const idsOrdenados = (cartas: Carta[]) => ids(cartas).sort((a, b) => a - b);
 
 describe("coleccionDe", () => {
   it("solo el estado Review cuenta como aprendida", () => {
@@ -42,7 +44,11 @@ describe("componerSesion, con cuantas = 0", () => {
       { modo: "mezcla", cuantas: 0, limiteNuevas: 2 },
     );
 
-    expect(ids(cartas)).toEqual([1, 2, 3, 4, 5]);
+    expect(cartas).toHaveLength(5);
+    // La en curso y las dos vencidas entran enteras; de las tres nuevas, dos.
+    // Cuáles de las tres ya no se puede afirmar: el grupo se baraja.
+    expect(idsOrdenados(cartas).filter((id) => id <= 3)).toEqual([1, 2, 3]);
+    expect(cartas.filter((c) => c.id >= 4)).toHaveLength(2);
   });
 
   it("no adelanta nunca lo que aún no vencía", () => {
@@ -80,7 +86,7 @@ describe("componerSesion, con un número explícito", () => {
       { modo: "no-aprendidas", cuantas: 3, limiteNuevas: 1 },
     );
 
-    expect(ids(cartas)).toEqual([1, 2, 3]);
+    expect(idsOrdenados(cartas)).toEqual([1, 2, 3]);
   });
 
   it("si no hay material para el número, la sesión es más corta y no roba de la otra colección", () => {
@@ -130,9 +136,44 @@ describe("componerSesion, los modos", () => {
 
 describe("componerSesion, el sorteo", () => {
   /**
-   * El sorteo solo actúa donde hay que elegir. Con `aleatorio` fijado se puede
-   * comprobar el resultado exacto, no solo la longitud.
+   * El usuario lo pidió después de usarlo: «siempre estaban en el mismo orden
+   * al hacer los tests». Y lo estaban: las nuevas salían por orden de la
+   * biblioteca —o sea, por el id del término— y solo se barajaba un grupo, y
+   * solo cuando había que recortarlo. Ahora se barajan los tres grupos de
+   * trabajo del día, siempre, entren enteros o recortados.
+   *
+   * Lo que NO se baraja son las adelantadas: su orden es el de vencimiento, y
+   * es lo que hace que adelantar dos días seguidos no traiga lo mismo.
    */
+  it("baraja las nuevas aunque entren todas", () => {
+    const { cartas } = componerSesion(
+      grupos({ nuevas: [carta(1), carta(2), carta(3), carta(4)] }),
+      { modo: "no-aprendidas", cuantas: 0, limiteNuevas: 10, aleatorio: () => 0 },
+    );
+
+    // barajar([1,2,3,4], () => 0) rota a [2,3,4,1]: si alguien quita el sorteo,
+    // esto vuelve a [1,2,3,4] y la prueba se pone roja.
+    expect(ids(cartas)).toEqual([2, 3, 4, 1]);
+  });
+
+  it("baraja las en curso aunque entren todas", () => {
+    const { cartas } = componerSesion(
+      grupos({ enCurso: [carta(1), carta(2), carta(3), carta(4)] }),
+      { modo: "no-aprendidas", cuantas: 0, limiteNuevas: 10, aleatorio: () => 0 },
+    );
+
+    expect(ids(cartas)).toEqual([2, 3, 4, 1]);
+  });
+
+  it("baraja los repasos vencidos aunque entren todos", () => {
+    const { cartas } = componerSesion(
+      grupos({ aprendidasVencidas: [carta(1), carta(2), carta(3), carta(4)] }),
+      { modo: "aprendidas", cuantas: 0, limiteNuevas: 10, aleatorio: () => 0 },
+    );
+
+    expect(ids(cartas)).toEqual([2, 3, 4, 1]);
+  });
+
   it("sortea los repasos vencidos cuando hay que dejar alguno fuera", () => {
     const vencidas = [carta(1), carta(2), carta(3), carta(4)];
     const { cartas } = componerSesion(grupos({ aprendidasVencidas: vencidas }), {
@@ -150,22 +191,24 @@ describe("componerSesion, el sorteo", () => {
     expect(ids(cartas)).toEqual([2, 3]);
   });
 
-  it("no toca el orden si caben todas", () => {
+  /**
+   * El sorteo es dentro de cada grupo, no entre grupos: primero lo que estás
+   * aprendiendo, luego los repasos y luego lo nuevo. Barajarlo todo junto
+   * mezclaría una palabra que fallaste hace diez minutos con una que no has
+   * visto nunca, y son dos trabajos distintos.
+   */
+  it("baraja dentro de cada grupo, sin mezclar unos con otros", () => {
     const { cartas } = componerSesion(
-      grupos({ aprendidasVencidas: [carta(1), carta(2), carta(3)] }),
-      { modo: "aprendidas", cuantas: 0, limiteNuevas: 10, aleatorio: () => 0 },
+      grupos({
+        enCurso: [carta(1), carta(2)],
+        aprendidasVencidas: [carta(3), carta(4)],
+        nuevas: [carta(5), carta(6)],
+      }),
+      { modo: "mezcla", cuantas: 0, limiteNuevas: 10, aleatorio: () => 0 },
     );
 
-    expect(ids(cartas)).toEqual([1, 2, 3]);
-  });
-
-  it("las en curso nunca entran en el sorteo: van en orden y enteras", () => {
-    const { cartas } = componerSesion(
-      grupos({ enCurso: [carta(1), carta(2), carta(3)] }),
-      { modo: "no-aprendidas", cuantas: 3, limiteNuevas: 10, aleatorio: () => 0 },
-    );
-
-    expect(ids(cartas)).toEqual([1, 2, 3]);
+    // barajar de dos elementos con aleatorio() = 0 los intercambia.
+    expect(ids(cartas)).toEqual([2, 1, 4, 3, 6, 5]);
   });
 
   it("las adelantadas van por orden de llegada, que es el de vencimiento", () => {
@@ -175,6 +218,25 @@ describe("componerSesion, el sorteo", () => {
     );
 
     expect(ids(cartas)).toEqual([7, 8]);
+  });
+
+  it("las adelantadas siguen sin barajarse aunque entren todas", () => {
+    const { cartas } = componerSesion(
+      grupos({ aprendidasFuturas: [carta(7), carta(8), carta(9), carta(10)] }),
+      { modo: "aprendidas", cuantas: 4, limiteNuevas: 10, aleatorio: () => 0 },
+    );
+
+    expect(ids(cartas)).toEqual([7, 8, 9, 10]);
+  });
+
+  /** Sin tope, `limiteNuevas` llega como infinito: el `slice` tiene que aguantarlo. */
+  it("sin tope entran todas las nuevas", () => {
+    const { cartas } = componerSesion(
+      grupos({ nuevas: [carta(1), carta(2), carta(3)] }),
+      { modo: "no-aprendidas", cuantas: 0, limiteNuevas: Number.POSITIVE_INFINITY },
+    );
+
+    expect(cartas).toHaveLength(3);
   });
 });
 
@@ -221,7 +283,8 @@ describe("componerSesion, enCursoFuera", () => {
       { modo: "mezcla", cuantas: 1, limiteNuevas: 10 },
     );
 
-    expect(ids(cartas)).toEqual([1]);
+    // Cuál de las tres entra es cosa del sorteo; que entre una sola, no.
+    expect(cartas).toHaveLength(1);
     expect(enCursoFuera).toBe(2);
     expect(repasosFuera).toBe(0);
   });

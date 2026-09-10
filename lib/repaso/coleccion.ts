@@ -83,10 +83,13 @@ export function componerSesion<T>(
   // Adelantar es exactamente lo que `cuantas = 0` promete no hacer.
   const futuras = sinRecorte ? [] : grupos.aprendidasFuturas;
 
-  const enCurso: Tramo<T> = { cartas: grupos.enCurso, sortear: false };
+  const enCurso: Tramo<T> = { cartas: grupos.enCurso, sortear: true };
   const vencidas: Tramo<T> = { cartas: grupos.aprendidasVencidas, sortear: true };
+  // Las adelantadas son el único grupo que conserva su orden, y no es capricho:
+  // vienen ordenadas por fecha de vencimiento, y es eso lo que hace que
+  // adelantar dos días seguidos no traiga las mismas palabras.
   const porVenir: Tramo<T> = { cartas: futuras, sortear: false };
-  const sinAprender: Tramo<T> = { cartas: nuevas, sortear: false };
+  const sinAprender: Tramo<T> = { cartas: nuevas, sortear: true };
 
   const tramos: Tramo<T>[] =
     modo === "no-aprendidas"
@@ -99,14 +102,10 @@ export function componerSesion<T>(
   for (const tramo of tramos) {
     const hueco = sinRecorte ? tramo.cartas.length : cuantas - cartas.length;
     if (!sinRecorte && hueco <= 0) break;
-    if (tramo.cartas.length <= hueco) {
-      cartas.push(...tramo.cartas);
-      continue;
-    }
-    // Solo aquí hay una decisión que tomar, y solo los repasos vencidos se
-    // sortean: las nuevas van en el orden de la biblioteca y las adelantadas
-    // por fecha, que es lo que hace que adelantar dos días seguidos no traiga
-    // lo mismo.
+    // El sorteo va aquí, antes del recorte y **entre o no entre el grupo
+    // entero**. Antes solo se barajaba lo que había que recortar, así que un
+    // grupo que cabía salía en el orden de la biblioteca: las mismas palabras
+    // en el mismo sitio todos los días. El usuario lo notó y lo dijo.
     const fuente = tramo.sortear ? barajar(tramo.cartas, aleatorio) : tramo.cartas;
     cartas.push(...fuente.slice(0, hueco));
   }

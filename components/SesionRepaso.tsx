@@ -443,6 +443,26 @@ export function resumenLegible(resumen: ResumenColecciones): {
 }
 
 /**
+ * Los dos totales de la biblioteca, en una línea.
+ *
+ * Existe porque el usuario creyó que las palabras no llegaban nunca a
+ * "aprendidas": tenía 31 aprendidas y el botón marcaba 0. Los dos son ciertos —
+ * el del botón es lo que **entra ahora**, y hoy no vencía ninguna—, pero uno
+ * solo no se puede leer bien. Aquí está el otro.
+ *
+ * Se calla si los dos son cero: eso es la biblioteca entera a medio aprender, y
+ * de ese caso ya habla el titular.
+ */
+export function lineaDeColecciones(resumen: ResumenColecciones): string {
+  const { sinAprender, aprendidas } = resumen.total;
+  const partes: string[] = [];
+  if (aprendidas > 0) partes.push(`${aprendidas} ${aprendidas === 1 ? "aprendida" : "aprendidas"}`);
+  if (sinAprender > 0) partes.push(`${sinAprender} sin aprender`);
+  if (partes.length === 0) return "";
+  return `En total tienes ${partes.join(" y ")}.`;
+}
+
+/**
  * Si de verdad no hay nada que repasar porque no hay vocabulario.
  *
  * Mira `biblioteca`, el único contador sin filtro, y no la suma de los totales:
@@ -868,6 +888,14 @@ export function SesionRepaso() {
               </Boton>
             ))}
           </div>
+          {/* El número de cada botón es lo que entra AHORA. Debajo, el total,
+              que es otra cosa: una palabra aprendida que no vence hasta el
+              martes cuenta en el segundo y no en el primero. */}
+          {lineaDeColecciones(resumen) && (
+            <p style={TEXTO_1} className="text-texto-suave">
+              {lineaDeColecciones(resumen)} Los números de los botones son las que entran ahora.
+            </p>
+          )}
         </fieldset>
 
         <Campo
@@ -925,11 +953,13 @@ export function SesionRepaso() {
         {/* El tope diario no es una elección de esta sesión: se guarda al salir
             del campo, como antes, y es el único sitio de la app desde el que se
             puede cambiar. Los contadores de arriba dependen de él, así que se
-            vuelven a pedir en cuanto se toca. */}
+            vuelven a pedir en cuanto se toca. Viene apagado (0): lo tenía
+            puesto en 20 sin que el usuario lo eligiera, y se tragaba en
+            silencio todo lo que añadía a la biblioteca. */}
         <div className="border-t border-borde pt-4">
           <Campo
             id="tope-tarjetas-nuevas"
-            etiqueta="Tarjetas nuevas al día"
+            etiqueta="Tope de palabras nuevas al día"
             claseControl="max-w-40"
             type="number"
             inputMode="numeric"
@@ -945,7 +975,7 @@ export function SesionRepaso() {
             ayuda={
               topeNuevas.error
                 ? undefined
-                : "Cuántas palabras nuevas quieres ver cada día. Se guarda para las próximas sesiones."
+                : "0 = sin tope: todo lo que añadas entra en el siguiente repaso. Cualquier otro número es el máximo de palabras nuevas al día. Se guarda para las próximas sesiones."
             }
           />
         </div>
