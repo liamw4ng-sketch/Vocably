@@ -5,7 +5,6 @@ import {
   validarCuantas,
   resumenLegible,
   bibliotecaVacia,
-  todoEnAprendizaje,
   modoDisponible,
   modoParaSeguir,
   etiquetaSeguir,
@@ -56,10 +55,23 @@ describe("disponibles", () => {
     expect(disponibles(r, "mezcla", 0)).toBe(12);
   });
 
-  it("con un número explícito cuenta lo adelantable, no solo lo de hoy", () => {
+  /**
+   * El botón de una categoría enseña su colección entera, venza hoy o no,
+   * porque es lo que trae al pulsarlo. Antes enseñaba solo lo vencido: con 31
+   * palabras aprendidas y ninguna venciendo hoy, marcaba 0 y salía en gris.
+   */
+  it("una categoría cuenta su colección entera, toque hoy o no", () => {
     const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 4, aprendidas: 6 });
     expect(disponibles(r, "aprendidas", 10)).toBe(6);
-    expect(disponibles(r, "aprendidas", 0)).toBe(0);
+    expect(disponibles(r, "aprendidas", 0)).toBe(6);
+    expect(disponibles(r, "no-aprendidas", 0)).toBe(4);
+  });
+
+  /** La mezcla no: es el plan del día, y con el número a 0 no adelanta nada. */
+  it("la mezcla con el número a 0 sigue contando solo lo de hoy", () => {
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 4, aprendidas: 6 });
+    expect(disponibles(r, "mezcla", 0)).toBe(0);
+    expect(disponibles(r, "mezcla", 10)).toBe(10);
   });
 });
 
@@ -151,36 +163,26 @@ describe("resumenLegible", () => {
       resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 9, aprendidas: 4 }),
     );
     expect(legible.titulo).toBe("Hoy no toca ninguna palabra");
-    expect(legible.detalle).toContain("pon un número");
+    expect(legible.detalle).toContain("pulsa una categoría");
   });
 
-  it("sin nada para hoy pero con algo que adelantar sigue ofreciendo el número", () => {
-    // Y la oferta es cierta: con un número, los modos tienen material.
+  it("y la salida que ofrece es cierta: la categoría tiene material", () => {
     const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 4 });
-    expect(resumenLegible(r).detalle).toContain("pon un número");
-    expect(disponibles(r, "aprendidas", 4)).toBe(4);
-    expect(puedeEmpezar(r, "mezcla", 4)).toBe(true);
+    expect(resumenLegible(r).detalle).toContain("pulsa una categoría");
+    expect(disponibles(r, "aprendidas", 0)).toBe(4);
+    expect(puedeEmpezar(r, "aprendidas", 0)).toBe(true);
   });
 
-  it("con la biblioteca entera en aprendizaje no dice que estés al día ni ofrece adelantar", () => {
-    // La reproducción: una sesión respondida entera con "Otra vez". No hay
-    // nada vencido y tampoco nada que adelantar, así que "pon un número" no
-    // haría nada —los tres modos salen a (0)— y "estás al día" es falso: las
-    // palabras vuelven en cuanto pase su paso de aprendizaje.
-    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 3);
-    const legible = resumenLegible(r);
-    expect(legible.titulo).toBe("Ahora mismo no toca ninguna palabra");
-    expect(legible.detalle).toBe(
-      "Las que estás aprendiendo vuelven en unos minutos. No hay nada que adelantar: vuelve a esta pantalla dentro de un rato.",
-    );
-    expect(legible.detalle).not.toContain("pon un número");
-    expect(legible.detalle).not.toContain("al día");
-    // Por qué no puede ofrecerlo: no hay número que saque nada.
-    for (const modo of MODOS) {
-      for (const cuantas of [0, 1, MAXIMO_TAMANO_SESION]) {
-        expect(disponibles(r, modo, cuantas)).toBe(0);
-      }
-    }
+  /**
+   * Ese callejón sin salida ya no existe: una sesión respondida entera con
+   * "Otra vez" deja las palabras en la colección "no aprendidas", y el botón
+   * las trae. Antes los tres modos salían a (0) y no había nada que hacer.
+   */
+  it("con la biblioteca entera fallada hace un momento, la categoría sigue teniendo material", () => {
+    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 3, aprendidas: 0 }, 3);
+    expect(resumenLegible(r).detalle).toContain("pulsa una categoría");
+    expect(disponibles(r, "no-aprendidas", 0)).toBe(3);
+    expect(puedeEmpezar(r, "no-aprendidas", 0)).toBe(true);
   });
 
   it("con la biblioteca vacía no habla de palabras en aprendizaje", () => {
@@ -189,7 +191,7 @@ describe("resumenLegible", () => {
     // que no existen si alguien la llama igualmente.
     const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 0);
     expect(bibliotecaVacia(r)).toBe(true);
-    expect(resumenLegible(r).titulo).not.toBe("Ahora mismo no toca ninguna palabra");
+    expect(resumenLegible(r).titulo).toBe("Hoy no toca ninguna palabra");
   });
 
   it("solo mira lo de hoy, no la biblioteca entera", () => {
@@ -218,38 +220,6 @@ describe("bibliotecaVacia", () => {
 
   it("con material para hoy tampoco está vacía", () => {
     expect(bibliotecaVacia(resumen({ sinAprender: 2, aprendidas: 1 }))).toBe(false);
-  });
-});
-
-describe("todoEnAprendizaje", () => {
-  it("es cierto con la biblioteca llena y nada que servir", () => {
-    // Tres palabras falladas hace medio minuto: en aprendizaje y sin vencer.
-    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 3);
-    expect(todoEnAprendizaje(r)).toBe(true);
-  });
-
-  it("es falso si queda algo que adelantar, aunque hoy no toque nada", () => {
-    // Aquí "pon un número" sí funciona, y tiene que seguir funcionando.
-    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 7 }, 7);
-    expect(todoEnAprendizaje(r)).toBe(false);
-    expect(puedeEmpezar(r, "aprendidas", 3)).toBe(true);
-  });
-
-  it("es falso con nuevas pendientes por encima del tope diario", () => {
-    // `hoy` está a cero porque el cupo se gastó, pero un número explícito se
-    // salta el tope: hay material.
-    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 5, aprendidas: 0 }, 5);
-    expect(todoEnAprendizaje(r)).toBe(false);
-  });
-
-  it("es falso con la biblioteca vacía: eso es no tener vocabulario, no tenerlo a medias", () => {
-    const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 0 }, 0);
-    expect(todoEnAprendizaje(r)).toBe(false);
-    expect(bibliotecaVacia(r)).toBe(true);
-  });
-
-  it("es falso con material para hoy", () => {
-    expect(todoEnAprendizaje(resumen({ sinAprender: 2, aprendidas: 1 }))).toBe(false);
   });
 });
 
@@ -291,9 +261,15 @@ describe("modoDisponible", () => {
     }
   });
 
-  it("el número también cuenta: lo adelantable puede rescatar un modo", () => {
+  /**
+   * Ahora la caída pasa también con el número a 0, y es lo correcto: desde que
+   * el botón de una categoría trae su colección entera, "no aprendidas" con
+   * cero palabras está vacío de verdad, y "aprendidas" con siete no lo está.
+   * Antes, con el 0, los dos parecían vacíos y se quedaba en el elegido.
+   */
+  it("cae al modo que sí tiene material, con número y sin él", () => {
     const r = resumen({ sinAprender: 0, aprendidas: 0 }, { sinAprender: 0, aprendidas: 7 });
-    expect(modoDisponible(r, "no-aprendidas", 0)).toBe("no-aprendidas");
+    expect(modoDisponible(r, "no-aprendidas", 0)).toBe("aprendidas");
     expect(modoDisponible(r, "no-aprendidas", 5)).toBe("aprendidas");
   });
 });
@@ -358,6 +334,7 @@ describe("modoParaSeguir", () => {
             {
               enCurso: Array.from({ length: fuera.enCursoFuera }, (_, i) => ({ id: 100 + i })),
               nuevas: [],
+              noAprendidasFuturas: [],
               aprendidasVencidas: Array.from({ length: fuera.repasosFuera }, (_, i) => ({
                 id: 200 + i,
               })),

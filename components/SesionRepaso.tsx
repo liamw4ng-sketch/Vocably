@@ -250,18 +250,24 @@ export const ETIQUETA_MODO: Record<Modo, string> = {
 };
 
 /**
- * Cuántas tarjetas hay para un modo. Con el número a 0 solo cuenta lo vencido,
- * porque eso es lo único que entraría; con un número explícito cuenta también
- * lo adelantable, que es de donde saldría el resto.
+ * Cuántas tarjetas hay para un modo.
+ *
+ * Los dos botones de **categoría** enseñan la colección entera, venza hoy o no:
+ * es exactamente lo que traen al pulsarlos. Antes enseñaban solo lo vencido, y
+ * de ahí venía el «me acaba de poner que es cero» con las palabras aprendidas
+ * ya guardadas.
+ *
+ * La **mezcla** es otra cosa: es el plan del día, así que con el número a 0
+ * cuenta lo que vence y con un número cuenta también lo que se adelantaría.
  */
 export function disponibles(
   resumen: ResumenColecciones,
   modo: Modo,
   cuantas: number,
 ): number {
+  if (modo === "no-aprendidas") return resumen.total.sinAprender;
+  if (modo === "aprendidas") return resumen.total.aprendidas;
   const lado = cuantas === 0 ? resumen.hoy : resumen.total;
-  if (modo === "no-aprendidas") return lado.sinAprender;
-  if (modo === "aprendidas") return lado.aprendidas;
   return lado.sinAprender + lado.aprendidas;
 }
 
@@ -381,28 +387,6 @@ export function ajustesARecordar(
 }
 
 /**
- * Si toda la biblioteca está a medio aprender: ni vencido ahora ni adelantable
- * después, pero con palabras guardadas.
- *
- * Es lo que deja una sesión respondida entera con "Otra vez", y separa las dos
- * maneras de que `hoy` esté a cero. `total` cuenta todo lo que se puede servir,
- * adelantando incluido —en curso vencidas y nuevas por un lado, aprendidas por
- * el otro—, así que un `total` a cero con `biblioteca > 0` no deja más
- * posibilidad que ésta: lo que queda está en aprendizaje y aún no vence.
- *
- * Importa porque es justo el estado en el que "pon un número" no puede hacer
- * nada: `disponibles` mira `total` en cuanto el número no es 0, de modo que los
- * tres modos salen a (0) y desactivados por mucho que se teclee, y "Empezar"
- * se queda en gris. Con `total > 0` —una biblioteca aprendida y todavía sin
- * vencer, por ejemplo— adelantar sí funciona y hay que seguir ofreciéndolo:
- * por eso no basta con mirar `biblioteca`, como hace `bibliotecaVacia`.
- */
-export function todoEnAprendizaje(resumen: ResumenColecciones): boolean {
-  const adelantables = resumen.total.sinAprender + resumen.total.aprendidas;
-  return adelantables === 0 && resumen.biblioteca > 0;
-}
-
-/**
  * El titular de la pantalla previa y su línea de detalle.
  *
  * Fuera del JSX para poder probar la concordancia: "Hoy tienes 1 palabras" era
@@ -417,20 +401,13 @@ export function resumenLegible(resumen: ResumenColecciones): {
   const hoy = sinAprender + aprendidas;
 
   if (hoy === 0) {
-    // Las dos maneras de no tener nada para hoy se dicen distinto porque la
-    // salida es distinta: en una se puede adelantar y en la otra solo esperar.
-    if (todoEnAprendizaje(resumen)) {
-      return {
-        titulo: "Ahora mismo no toca ninguna palabra",
-        detalle:
-          "Las que estás aprendiendo vuelven en unos minutos. No hay nada que adelantar: vuelve a esta pantalla dentro de un rato.",
-      };
-    }
-
+    // Ya no hay dos casos que distinguir. Desde que los botones de categoría
+    // traen su colección entera, "hoy no toca nada" tiene siempre la misma
+    // salida: pulsar una. Antes había un segundo mensaje para la biblioteca a
+    // medio aprender, que era un callejón sin salida y ya no existe.
     return {
       titulo: "Hoy no toca ninguna palabra",
-      detalle:
-        "Estás al día. Si quieres seguir, pon un número y se adelantan las que vengan después.",
+      detalle: "Estás al día. Si quieres seguir, pulsa una categoría y te la repaso igual.",
     };
   }
 
