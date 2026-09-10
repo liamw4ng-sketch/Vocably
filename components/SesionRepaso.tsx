@@ -16,7 +16,13 @@ import {
   esModo,
   type Modo,
 } from "@/lib/ajustes";
-import { crearSesion, type EnvioRespuesta, type Sesion, type Valoracion } from "@/lib/review-session";
+import {
+  crearSesion,
+  type EnvioRespuesta,
+  type Resumen,
+  type Sesion,
+  type Valoracion,
+} from "@/lib/review-session";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
 import { Tarjeta } from "@/components/ui/Tarjeta";
@@ -39,6 +45,27 @@ const VALORACIONES: BotonValoracion[] = [
   { valor: 3, etiqueta: "Bien", campo: "bien", clase: "bg-valoracion-bien" },
   { valor: 4, etiqueta: "Fácil", campo: "facil", clase: "bg-valoracion-facil" },
 ];
+
+/**
+ * Cómo va la sesión ahora mismo: cuántas veces has pulsado cada botón.
+ *
+ * Lo pidió repasando: «una especie de estadística arriba que diga cosas como el
+ * número de palabras que me han parecido difíciles... no solo al final del
+ * test». Va en el orden de los botones para que se lean en el mismo sitio en el
+ * que están, y con su mismo color.
+ *
+ * Los que están a cero se quedan fuera: un cero no informa de nada y en un móvil
+ * roba una línea que hace falta para la tarjeta.
+ */
+export function marcadorDeSesion(
+  conteo: Resumen,
+): { etiqueta: string; valor: number; clase: string }[] {
+  return VALORACIONES.filter((boton) => conteo[boton.campo] > 0).map((boton) => ({
+    etiqueta: boton.etiqueta,
+    valor: conteo[boton.campo],
+    clase: boton.clase,
+  }));
+}
 
 const ETIQUETA_TIPO: Record<string, string> = {
   word: "palabra",
@@ -655,6 +682,26 @@ export function SesionRepaso() {
   }, [cargarPrevia]);
 
   /**
+   * Abandonar el repaso a medias.
+   *
+   * No se pierde nada: cada respuesta se manda en cuanto se pulsa el botón, así
+   * que lo contestado hasta aquí ya está guardado o de camino. Por eso se
+   * espera a `pendientes()` antes de pedir los contadores: sin esa espera, la
+   * pantalla previa enseñaría los de antes de la sesión y parecería que el
+   * trabajo no ha contado.
+   */
+  const salirDelRepaso = useCallback(() => {
+    const enMarcha = sesion;
+    if (!enMarcha) return;
+    setSesion(null);
+    setEstado("cargando");
+    void enMarcha.pendientes().then(() => {
+      if (!montadoRef.current) return;
+      void cargarPrevia();
+    });
+  }, [sesion, cargarPrevia]);
+
+  /**
    * Los contadores otra vez, sin vaciar la pantalla: se usa al cambiar el tope
    * diario, que es de lo que depende cuántas palabras nuevas entran hoy. Si
    * falla se quedan los de antes; no vale la pena tirar abajo la pantalla
@@ -977,6 +1024,7 @@ export function SesionRepaso() {
   }
 
   const { hechas, total } = sesion.progreso();
+  const marcador = marcadorDeSesion(sesion.resumen());
   const carta = sesion.cartaActual();
 
   if (!carta) {
@@ -1083,13 +1131,15 @@ export function SesionRepaso() {
   return (
     <div className="flex flex-1 flex-col gap-6">
       <header className="flex flex-col gap-2">
-        <div className="flex items-baseline justify-between gap-4">
+        <div className="flex items-center justify-between gap-4">
           <h1 style={TEXTO_1} className="text-texto-suave">
             {total === 1 ? "Hoy toca 1 tarjeta" : `Hoy tocan ${total} tarjetas`}
           </h1>
-          <p style={TEXTO_1} className="text-texto-suave tabular-nums">
-            {hechas} / {total}
-          </p>
+          {/* Arriba y pequeño, lejos de los cuatro botones de valorar: ahí abajo
+              está el pulgar, y salir sin querer de un repaso a medias enfada. */}
+          <Boton variante="secundario" className="min-h-10 px-3" onClick={salirDelRepaso}>
+            Salir
+          </Boton>
         </div>
         <div
           role="progressbar"
@@ -1100,6 +1150,24 @@ export function SesionRepaso() {
           className="h-1 w-full overflow-hidden rounded-control bg-borde"
         >
           <div className="h-full bg-acento" style={{ width: `${porcentaje}%` }} />
+        </div>
+        {/* Cómo va la sesión, sin esperar al final. Cada uno con el color de su
+            botón: es lo que los hace reconocibles de un vistazo. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p style={TEXTO_1} className="text-texto-suave tabular-nums">
+            {hechas} / {total}
+          </p>
+          {marcador.map((cuenta) => (
+            <p
+              key={cuenta.etiqueta}
+              style={TEXTO_1}
+              className="flex items-center gap-1 text-texto-suave"
+            >
+              <span aria-hidden className={`h-2 w-2 rounded-full ${cuenta.clase}`} />
+              {cuenta.etiqueta}
+              <span className="tabular-nums font-medium text-texto">{cuenta.valor}</span>
+            </p>
+          ))}
         </div>
       </header>
 
