@@ -2,6 +2,12 @@
 
 **Fecha:** 2026-09-09
 **Estado:** especificado, sin implementar
+**Enmendado:** 2026-09-10, tras medir contra la base real con la implementación
+ya en el PR #4 — sobre un capítulo limpio de 8.520 palabras con suelo B2, de
+453 sugerencias 243 eran "expresiones" como `not that`, `of his` o `the man`:
+más de la mitad de la lista era paja. Se estrecha la decisión 2 (§3) y el
+filtro de §7.2: solo los verbos frasales entran siempre; las expresiones pasan
+a filtrarse por nivel, igual que las palabras sueltas.
 **Diseño general:** `docs/superpowers/specs/2026-09-06-app-vocabulario-design.md`
 **Extracción actual (la que esto NO sustituye):** `docs/superpowers/plans/2026-09-06-fase-1-extraccion.md`
 **El español del diccionario (de lo que esto se apoya):** `docs/superpowers/specs/2026-09-09-espanol-del-diccionario-design.md`
@@ -43,9 +49,13 @@ Las cinco del usuario, en el orden en que se tomaron:
 
 1. **El filtro es el nivel, con suelo que él elige.** Palabras sueltas: solo de
    su nivel para arriba.
-2. **Los verbos frasales y las expresiones se ofrecen siempre**, tengan nivel o
-   no. No lo tienen (§4), y son buena parte de lo que esta aplicación existe para
-   aprender: el diccionario trae 20.012.
+2. **Los verbos frasales se ofrecen siempre**, tengan nivel o no. No lo tienen
+   (§4), y son buena parte de lo que esta aplicación existe para aprender: el
+   diccionario trae 20.012. *(Enmendado 2026-09-10: al principio la decisión
+   incluía también las expresiones, pero medido contra la base real más de la
+   mitad de lo que ese "siempre" dejaba pasar era ruido gramatical —`of his`,
+   `the man`— y no vocabulario. Las expresiones se estrecharon a filtrarse por
+   nivel, igual que las palabras sueltas: ver la Enmienda de cabecera y §7.2.)*
 3. **Sus PDFs llevan texto**, no son escaneos. Sin esto el proyecto no existía:
    una biblioteca de extracción no lee imágenes.
 4. **La lista de candidatas no sobrevive** a cerrar la pantalla. Él controla el
@@ -178,10 +188,12 @@ sin explicación invita a "arreglarlo" mal dentro de seis meses.
 
 - **Si la palabra tiene nivel**, se guarda el suyo. Es la mejora: hoy `level` es
   el que el usuario elige para el PDF entero, igual para todas sus palabras.
-- **Si no lo tiene** —verbos frasales, expresiones, y las formas que el listado no
-  cubre— se guarda **el suelo que él eligió**. Es exactamente lo que pasa hoy con
-  todo, así que no empeora nada; y la pantalla dice cuáles llevan nivel medido y
-  cuáles heredado (§8), para no fingir una precisión que no hay.
+- **Si no lo tiene** —solo puede ser un verbo frasal, tras la enmienda de
+  2026-09-10 a §7.2: palabras sueltas y expresiones sin nivel ya no llegan
+  hasta aquí, el filtro las corta antes— se guarda **el suelo que él eligió**.
+  Es exactamente lo que pasa hoy con todo, así que no empeora nada; y la
+  pantalla dice cuáles llevan nivel medido y cuáles heredado (§8), para no
+  fingir una precisión que no hay.
 
 ## 7. El flujo
 
@@ -228,12 +240,19 @@ filtro. Por cada una consulta lo que ya está montado:
    la pantalla del diccionario.
 4. **La biblioteca** — lo que ya está guardado no se vuelve a ofrecer.
 
-**El filtro**, con la decisión 1 y 2 de §3:
+**El filtro**, con la decisión 1 y 2 de §3 *(enmendada 2026-09-10)*:
 
-- **Palabras sueltas**: entran si su nivel es igual o superior al suelo. Sin
-  nivel, fuera — son nombres propios y rarezas.
-- **Verbos frasales y expresiones**: entran siempre. Son las candidatas de más de
-  una palabra que el diccionario reconoce.
+- **Palabras sueltas y expresiones**: entran si su nivel es igual o superior al
+  suelo. Sin nivel, fuera.
+- **Verbos frasales**: entran siempre, tengan nivel o no.
+
+Las expresiones no siempre se filtraron por nivel. Medido sobre un capítulo
+real de 8.520 palabras con suelo B2, de 453 sugerencias 243 eran "expresiones"
+como `not that`, `of his` o `the man` — grupos de palabras que Wikcionario
+registra igual que un verbo frasal, pero que son ruido gramatical, no
+vocabulario que enseñar. Más de la mitad de la lista era paja. Consecuencia
+conocida y aceptada: los frasales de relleno (`take it`, `do it`) sobreviven
+igual, porque Wikcionario los registra como verbos.
 
 **No se llama a MyMemory.** Traducir cientos de candidatas de golpe se comería la
 cuota diaria de 5.000 caracteres en una extracción, que es justo el fallo que la
@@ -247,10 +266,13 @@ Una lista para marcar, **ordenada de más difícil a más fácil**: C2 primero,
 A1 al final.
 
 **Los verbos frasales y las expresiones van los primeros de todo**, por encima
-del C2. No tienen nivel, así que cualquier sitio que se les dé es una decisión;
-esta es la honesta, porque son lo que el usuario más quiere y lo que ninguna
-fuente gratuita sabe puntuar. Dentro de ese bloque van en el orden en que
-aparecen en el texto.
+del C2. Los frasales no tienen nivel *(enmendado 2026-09-10: las expresiones,
+desde que el filtro se estrechó en §7.2, sí lo tienen — necesitan alcanzar el
+suelo para llegar aquí)*, así que cualquier sitio que se les dé a ellos es una
+decisión; esta es la honesta, porque son lo que el usuario más quiere y lo que
+ninguna fuente gratuita sabe puntuar. Dentro de ese bloque van en el orden en
+que aparecen en el texto, y no por nivel: agruparlos así es un criterio, no un
+olvido (ver el comentario del `sort` en `db/repository/extraer.ts`).
 
 Cada línea:
 

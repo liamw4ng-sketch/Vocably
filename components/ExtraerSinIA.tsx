@@ -445,7 +445,7 @@ export function ExtraerSinIA() {
           value={suelo}
           onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSuelo(e.target.value)}
           opciones={CEFR_LEVELS.map((nivel) => ({ valor: nivel, etiqueta: nivel }))}
-          ayuda="Es un filtro, no una etiqueta: se descartan las palabras sueltas por debajo de este nivel. Los verbos frasales y las expresiones se muestran siempre, tengan el nivel que tengan."
+          ayuda="Es un filtro, no una etiqueta: se descartan las palabras y expresiones por debajo de este nivel. Los verbos frasales se muestran siempre, tengan el nivel que tengan."
         />
 
         <Boton type="submit" variante="primario" disabled={!file || analizando} className="w-full">

@@ -61,6 +61,40 @@ describe("buscarSugerencias", () => {
     await close();
   });
 
+  /**
+   * Es el cambio de la decisión 2, medido contra un capítulo real: de 453
+   * sugerencias, 243 eran "expresiones" como `of his` o `the man` — grupos de
+   * palabras sin ningún vocabulario que enseñar. Ahora necesitan nivel y
+   * necesitan alcanzar el suelo, igual que las palabras sueltas.
+   */
+  it("corta una expresión sin nivel: ya no entra siempre", async () => {
+    const { db, close } = await createTestDb();
+    await baseConDiccionario(db);
+    await db.insert(dictionaryEntries).values({
+      termNormalized: "the man", term: "the man", pos: "noun", gloss: "Referencia genérica a un hombre.", example: null,
+    });
+
+    expect(await buscarSugerencias(db, [candidata("the man")], "A1")).toEqual([]);
+    await close();
+  });
+
+  it("deja pasar una expresión que alcanza el suelo", async () => {
+    const { db, close } = await createTestDb();
+    await baseConDiccionario(db);
+    await db.insert(dictionaryEntries).values({
+      termNormalized: "in fact", term: "in fact", pos: "adv", gloss: "En realidad.", example: null,
+    });
+    await cargarNiveles(db, lineasDe("in fact,adverb,B2,,,"));
+
+    const s = await buscarSugerencias(db, [candidata("in fact")], "B2");
+
+    expect(s).toHaveLength(1);
+    expect(s[0].term).toBe("in fact");
+    expect(s[0].nivel).toBe("B2");
+    expect(s[0].tipo).toBe("expression");
+    await close();
+  });
+
   it("corta una palabra suelta sin nivel: es nombre propio o rareza", async () => {
     const { db, close } = await createTestDb();
     await baseConDiccionario(db);

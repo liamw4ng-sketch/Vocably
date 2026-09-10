@@ -37,11 +37,21 @@ export type Sugerencia = {
  *
  * El filtro, que es la razón de ser de esta función:
  *
- * - **Palabras sueltas**: entran si su nivel alcanza el suelo. **Sin nivel,
- *   fuera**: son nombres propios y rarezas que el listado no cubre.
- * - **Verbos frasales y expresiones**: entran **siempre**. El listado del MCER
- *   no trae ni uno solo, así que filtrarlos por nivel los borraría todos — y
- *   son buena parte de lo que esta aplicación existe para aprender.
+ * - **Palabras sueltas y expresiones**: entran si su nivel alcanza el suelo.
+ *   **Sin nivel, fuera**.
+ * - **Verbos frasales**: entran **siempre**, tengan nivel o no. El listado del
+ *   MCER no trae ni uno solo, así que filtrarlos por nivel los borraría todos —
+ *   y son buena parte de lo que esta aplicación existe para aprender.
+ *
+ * Las expresiones no siempre se libraron del filtro: medido sobre un capítulo
+ * real de 8.520 palabras con suelo B2, de **453 sugerencias, 243 eran
+ * "expresiones"** como `not that`, `of his` o `the man` — grupos de palabras
+ * que Wikcionario registra igual que un verbo frasal, pero que son ruido
+ * gramatical, no vocabulario que enseñar. Más de la mitad de la lista era
+ * paja, y el usuario decidió estrecharla: ahora las expresiones necesitan
+ * nivel y necesitan alcanzar el suelo, igual que las palabras sueltas.
+ * Consecuencia conocida y aceptada: los frasales de relleno (`take it`,
+ * `do it`) sobreviven igual, porque Wikcionario los registra como verbos.
  *
  * **No se llama a MyMemory.** Traducir cientos de candidatas de golpe se comería
  * su cuota diaria de 5.000 caracteres en una sola extracción. Una candidata sin
@@ -116,9 +126,10 @@ export async function buscarSugerencias(
     const tipo = tipoDeTermino(acepcion.term, acepcion.pos);
     const nivel = niveles.get(termNormalized) ?? null;
 
-    // Las de una sola palabra necesitan nivel y necesitan alcanzar el suelo.
-    // Las de varias entran siempre: ver el comentario de arriba.
-    if (tipo === "word" && (!nivel || !alcanzaElSuelo(nivel, suelo))) continue;
+    // Todo menos los verbos frasales necesita nivel y necesita alcanzar el
+    // suelo: palabras sueltas y expresiones por igual. Ver el comentario de
+    // arriba — el porqué está medido, no supuesto.
+    if (tipo !== "phrasal_verb" && (!nivel || !alcanzaElSuelo(nivel, suelo))) continue;
 
     conOrden.push({
       sugerencia: {
@@ -142,10 +153,12 @@ export async function buscarSugerencias(
   // ninguna fuente gratuita sabe puntuar.
   //
   // Se agrupa por número de palabras, no por si tienen nivel: no es lo mismo.
-  // El listado del MCER trae ocho entradas verbales de varias palabras
-  // (`mull over`, `eke out`), que son frasales **con** nivel medido y aun así
-  // van en el primer bloque. Dentro de él manda el orden del texto, porque el
-  // nivel que tengan unos pocos no ordenaría a los demás.
+  // Las expresiones que llegan hasta aquí siempre tienen nivel medido —desde
+  // que se estrechó el filtro de arriba, lo necesitan para pasar— y aun así
+  // van en el primer bloque. Lo mismo pasa con las ocho entradas verbales de
+  // varias palabras que trae el listado del MCER (`mull over`, `eke out`),
+  // frasales **con** nivel medido. Dentro del bloque manda el orden del texto,
+  // porque el nivel que tengan unos pocos no ordenaría a los demás.
   conOrden.sort((a, b) => {
     const aEsSuelta = a.sugerencia.tipo === "word";
     const bEsSuelta = b.sugerencia.tipo === "word";
