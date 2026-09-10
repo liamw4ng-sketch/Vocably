@@ -11,6 +11,7 @@ function grupos(parcial: Partial<Grupos<Carta>> = {}): Grupos<Carta> {
   return {
     enCurso: [],
     nuevas: [],
+    noAprendidasFuturas: [],
     aprendidasVencidas: [],
     aprendidasFuturas: [],
     ...parcial,
@@ -22,14 +23,28 @@ const ids = (cartas: Carta[]) => cartas.map((c) => c.id);
 const idsOrdenados = (cartas: Carta[]) => ids(cartas).sort((a, b) => a - b);
 
 describe("coleccionDe", () => {
-  it("solo el estado Review cuenta como aprendida", () => {
-    expect(coleccionDe(2)).toBe("aprendidas");
+  /**
+   * La colección la decide **el botón que pulsó el usuario**, no el estado del
+   * programador. Lo pidió así después de usarlo: «si digo que es fácil o ya me
+   * lo sé, pues se va en la categoría de aprendidas... y las palabras que diga
+   * que son difícil, allí se quedan aún en no aprendidas».
+   *
+   * Antes miraba el estado FSRS, y a FSRS le da igual qué botón pulses: una
+   * palabra respondida "Difícil" acababa en "aprendidas" igual que una "Fácil".
+   */
+  it("Bien y Fácil dejan la palabra aprendida", () => {
+    expect(coleccionDe(3)).toBe("aprendidas");
+    expect(coleccionDe(4)).toBe("aprendidas");
   });
 
-  it("nueva, en aprendizaje y en reaprendizaje son la misma colección", () => {
-    expect(coleccionDe(0)).toBe("no-aprendidas");
+  it("Otra vez y Difícil la dejan sin aprender", () => {
     expect(coleccionDe(1)).toBe("no-aprendidas");
-    expect(coleccionDe(3)).toBe("no-aprendidas");
+    expect(coleccionDe(2)).toBe("no-aprendidas");
+  });
+
+  /** Sin respuesta todavía: es nueva, y una palabra nueva no está aprendida. */
+  it("sin ninguna respuesta, sin aprender", () => {
+    expect(coleccionDe(null)).toBe("no-aprendidas");
   });
 });
 
@@ -51,10 +66,14 @@ describe("componerSesion, con cuantas = 0", () => {
     expect(cartas.filter((c) => c.id >= 4)).toHaveLength(2);
   });
 
-  it("no adelanta nunca lo que aún no vencía", () => {
+  /**
+   * La mezcla es el plan del día: con el número a 0 no adelanta nada. Pedir una
+   * categoría a propósito sí las trae enteras, y eso se prueba más abajo.
+   */
+  it("la mezcla no adelanta lo que aún no vencía", () => {
     const { cartas } = componerSesion(
       grupos({ aprendidasVencidas: [carta(1)], aprendidasFuturas: [carta(9)] }),
-      { modo: "aprendidas", cuantas: 0, limiteNuevas: 10 },
+      { modo: "mezcla", cuantas: 0, limiteNuevas: 10 },
     );
 
     expect(ids(cartas)).toEqual([1]);
@@ -321,5 +340,68 @@ describe("componerSesion, enCursoFuera", () => {
     expect(cartas).toHaveLength(3);
     expect(enCursoFuera).toBe(0);
     expect(repasosFuera).toBe(2);
+  });
+});
+
+describe("componerSesion, los botones de categoría traen siempre", () => {
+  /**
+   * Lo pidió al probarlo: «la categoría aprendidas también se puede volver a
+   * testear con flashcards si es necesario». Antes, con el número a 0, las que
+   * aún no vencían se tiraban, así que pulsar "Aprendidas" sin nada vencido
+   * daba una sesión vacía y el botón salía en gris con un 0 al lado.
+   *
+   * Las dos categorías se comportan igual: eligió lo mismo para las dos.
+   */
+  it("aprendidas trae también las que aún no tocan", () => {
+    const { cartas } = componerSesion(
+      grupos({
+        aprendidasVencidas: [carta(1)],
+        aprendidasFuturas: [carta(2), carta(3)],
+      }),
+      { modo: "aprendidas", cuantas: 0, limiteNuevas: 10 },
+    );
+
+    expect(cartas).toHaveLength(3);
+  });
+
+  it("no aprendidas trae también las falladas que aún no vuelven", () => {
+    const { cartas } = componerSesion(
+      grupos({
+        enCurso: [carta(1)],
+        nuevas: [carta(2)],
+        noAprendidasFuturas: [carta(3), carta(4)],
+      }),
+      { modo: "no-aprendidas", cuantas: 0, limiteNuevas: 10 },
+    );
+
+    expect(cartas).toHaveLength(4);
+  });
+
+  /**
+   * La mezcla no cambia: es el plan del día, y con el número a 0 sigue siendo
+   * "lo que toca hoy". Adelantar desde ahí es lo que hace el campo "Cuántas".
+   */
+  it("la mezcla con el número a 0 sigue trayendo solo lo que toca hoy", () => {
+    const { cartas } = componerSesion(
+      grupos({
+        enCurso: [carta(1)],
+        aprendidasVencidas: [carta(2)],
+        aprendidasFuturas: [carta(3)],
+        noAprendidasFuturas: [carta(4)],
+      }),
+      { modo: "mezcla", cuantas: 0, limiteNuevas: 10 },
+    );
+
+    expect(idsOrdenados(cartas)).toEqual([1, 2]);
+  });
+
+  /** El orden de las que aún no tocan sigue siendo el de vencimiento. */
+  it("dentro de una categoría, primero lo que ya toca y luego lo más cercano", () => {
+    const { cartas } = componerSesion(
+      grupos({ aprendidasVencidas: [carta(1)], aprendidasFuturas: [carta(2), carta(3)] }),
+      { modo: "aprendidas", cuantas: 0, limiteNuevas: 10, aleatorio: () => 0 },
+    );
+
+    expect(ids(cartas)).toEqual([1, 2, 3]);
   });
 });

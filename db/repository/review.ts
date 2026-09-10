@@ -1,4 +1,4 @@
-import { and, eq, asc, gte, count, sql, type SQL } from "drizzle-orm";
+import { and, eq, asc, desc, gte, count, sql, type SQL } from "drizzle-orm";
 import { terms, termOccurrences, cardStates, sources, reviewLogs } from "@/db/schema";
 import { getAjustes } from "@/db/repository/settings";
 import type { Database } from "@/db/types";
@@ -6,7 +6,13 @@ import { State, fsrs, type Grade } from "ts-fsrs";
 import { toFsrsCard, fromFsrsCard } from "@/lib/fsrs";
 import { inicioDelDia } from "@/lib/dia";
 import { formatearPlazo } from "@/lib/plazo";
-import { componerSesion, type Grupos, type VencidosFuera } from "@/lib/repaso/coleccion";
+import {
+  APRENDIDA_DESDE,
+  coleccionDe,
+  componerSesion,
+  type Grupos,
+  type VencidosFuera,
+} from "@/lib/repaso/coleccion";
 import { cupoDeNuevas, type Modo } from "@/lib/ajustes";
 
 const programador = fsrs();
@@ -80,7 +86,27 @@ async function introducidasHoy(db: Database, ahora: Date): Promise<number> {
 }
 
 /**
- * La cola del día, recogida en cuatro grupos:
+ * La última respuesta del usuario en cada palabra, que es lo que decide a qué
+ * colección pertenece (ver `coleccionDe`). Las que no aparecen en el mapa no se
+ * han respondido nunca: son las nuevas.
+ *
+ * El desempate por `id` importa: dos respuestas pueden compartir `reviewed_at`
+ * al milisegundo si se contestan dos tarjetas seguidas muy rápido, y sin él
+ * cuál se considera "la última" dependería del plan de consulta.
+ */
+async function ultimasValoraciones(db: Database): Promise<Map<number, number>> {
+  const filas = await db
+    .selectDistinctOn([reviewLogs.termId], {
+      termId: reviewLogs.termId,
+      rating: reviewLogs.rating,
+    })
+    .from(reviewLogs)
+    .orderBy(reviewLogs.termId, desc(reviewLogs.reviewedAt), desc(reviewLogs.id));
+  return new Map(filas.map((f) => [f.termId, f.rating]));
+}
+
+/**
+ * La cola del día, recogida en cinco grupos:
  *
  *  - **En curso** (aprendizaje o reaprendizaje): palabras falladas hace
  *    minutos, y **solo las que ya vencen**. Las que el programador ha puesto
@@ -139,16 +165,19 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
     .where(filtros.length > 0 ? and(...filtros) : undefined)
     .orderBy(asc(terms.id), asc(termOccurrences.id));
 
+  const valoraciones = await ultimasValoraciones(db);
   const vistos = new Set<number>();
   const nuevas: CartaCola[] = [];
   const enCurso: CartaCola[] = [];
   const aprendidasVencidas: CartaCola[] = [];
-  const futurasConFecha: { carta: CartaCola; due: Date }[] = [];
+  const futurasAprendidas: { carta: CartaCola; due: Date }[] = [];
+  const futurasNoAprendidas: { carta: CartaCola; due: Date }[] = [];
 
   for (const f of filas) {
     if (vistos.has(f.termId)) continue;
     vistos.add(f.termId);
 
+    const ultima = valoraciones.get(f.termId) ?? null;
     const previsiones = programador.repeat(toFsrsCard(f), opts.now);
     const carta: CartaCola = {
       termId: f.termId,
@@ -159,7 +188,10 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
       senseHint: f.senseHint,
       context: f.context ?? "",
       example: f.example ?? "",
-      esNueva: f.state === State.New,
+      // Nueva es "todavía sin responder", que es exactamente no tener última
+      // valoración. Se define igual que la colección para que las dos no puedan
+      // discrepar nunca.
+      esNueva: ultima === null,
       plazos: {
         1: formatearPlazo(opts.now, previsiones[1].card.due),
         2: formatearPlazo(opts.now, previsiones[2].card.due),
@@ -167,12 +199,14 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
         4: formatearPlazo(opts.now, previsiones[4].card.due),
       },
     };
-    if (carta.esNueva) nuevas.push(carta);
-    else if (f.state === State.Review) {
-      // Las que aún no vencen ya no se tiran: son las que se pueden adelantar.
+    if (ultima === null) nuevas.push(carta);
+    else if (coleccionDe(ultima) === "aprendidas") {
       if (f.due <= opts.now) aprendidasVencidas.push(carta);
-      else futurasConFecha.push({ carta, due: f.due });
+      else futurasAprendidas.push({ carta, due: f.due });
     } else if (f.due <= opts.now) enCurso.push(carta);
+    // Falladas hace un rato que vuelven dentro de unos minutos. Ya no se tiran:
+    // pedir "No aprendidas" a propósito las trae.
+    else futurasNoAprendidas.push({ carta, due: f.due });
   }
 
   // El tope es DIARIO: lo que queda de cupo es el tope menos lo que ya se ha
@@ -184,13 +218,15 @@ export async function getDueQueue(db: Database, opts: OpcionesCola): Promise<Col
 
   // La más próxima primero: adelantar al azar traería lo mismo dos días
   // seguidos y dejaría lo de pasado mañana sin tocar.
+  const porFecha = (grupo: { carta: CartaCola; due: Date }[]) =>
+    grupo.sort((a, b) => a.due.getTime() - b.due.getTime()).map((f) => f.carta);
+
   const grupos: Grupos<CartaCola> = {
     enCurso,
     nuevas,
+    noAprendidasFuturas: porFecha(futurasNoAprendidas),
     aprendidasVencidas,
-    aprendidasFuturas: futurasConFecha
-      .sort((a, b) => a.due.getTime() - b.due.getTime())
-      .map((f) => f.carta),
+    aprendidasFuturas: porFecha(futurasAprendidas),
   };
 
   return componerSesion(grupos, {
@@ -286,37 +322,51 @@ export type ResumenColecciones = {
  * usuario haya elegido nada, y construir la cola implica calcular los cuatro
  * plazos de cada carta con FSRS.
  *
- * `sinAprender` cuenta solo lo EN CURSO YA VENCIDO (más las nuevas): igual que
- * `getDueQueue`, que tira sin más las Learning/Relearning que aún no vencen en
- * vez de recogerlas en un grupo aparte (a diferencia de las aprendidas
- * futuras, que sí se guardan para poder adelantarlas). Si `total.sinAprender`
- * las contara, la pantalla ofrecería "no aprendidas" con tarjetas y la sesión
- * volvería vacía. Justo por eso hace falta `biblioteca`: es el único recuento
- * que no filtra, y el único del que se puede deducir que no hay vocabulario.
+ * La colección sale de **la última respuesta del usuario**, no del estado del
+ * programador: ver `coleccionDe`. `hoy` cuenta solo lo que vence (más las
+ * nuevas que quepan en el cupo) y `total` cuenta la colección entera, que es lo
+ * que enseñan los botones de categoría — esos las traen todas, venzan o no.
+ *
+ * `biblioteca` es el único recuento que no filtra por nada, y el único del que
+ * se puede deducir que de verdad no hay vocabulario.
  */
 export async function contarColecciones(db: Database, ahora: Date): Promise<ResumenColecciones> {
+  // La última valoración de cada palabra, como subconsulta correlacionada: es
+  // lo que decide su colección, igual que en `getDueQueue`. `null` es una
+  // palabra sin responder todavía.
+  const ultima = sql`(
+    select r.rating from ${reviewLogs} r
+    where r.term_id = ${cardStates.termId}
+    order by r.reviewed_at desc, r.id desc
+    limit 1
+  )`;
+  const aprendida = sql`${ultima} >= ${APRENDIDA_DESDE}`;
+  const respondidaSinAprender = sql`${ultima} is not null and ${ultima} < ${APRENDIDA_DESDE}`;
+
   const [fila] = await db
     .select({
-      nuevas: sql<number>`count(*) filter (where ${cardStates.state} = ${State.New})::int`,
-      enCursoVencidas: sql<number>`count(*) filter (where ${cardStates.state} in (${State.Learning}, ${State.Relearning}) and ${cardStates.due} <= ${ahora})::int`,
-      aprendidasVencidas: sql<number>`count(*) filter (where ${cardStates.state} = ${State.Review} and ${cardStates.due} <= ${ahora})::int`,
-      aprendidasTotal: sql<number>`count(*) filter (where ${cardStates.state} = ${State.Review})::int`,
+      nuevas: sql<number>`count(*) filter (where ${ultima} is null)::int`,
+      sinAprenderVencidas: sql<number>`count(*) filter (where ${respondidaSinAprender} and ${cardStates.due} <= ${ahora})::int`,
+      sinAprenderTotal: sql<number>`count(*) filter (where ${respondidaSinAprender})::int`,
+      aprendidasVencidas: sql<number>`count(*) filter (where ${aprendida} and ${cardStates.due} <= ${ahora})::int`,
+      aprendidasTotal: sql<number>`count(*) filter (where ${aprendida})::int`,
       biblioteca: sql<number>`count(*)::int`,
     })
     .from(cardStates);
 
   const nuevas = fila?.nuevas ?? 0;
-  const enCurso = fila?.enCursoVencidas ?? 0;
   const tope = (await getAjustes(db)).newCardsPerDay;
   const cupo = cupoDeNuevas(tope, await introducidasHoy(db, ahora));
 
   return {
     hoy: {
-      sinAprender: enCurso + Math.min(nuevas, cupo),
+      sinAprender: (fila?.sinAprenderVencidas ?? 0) + Math.min(nuevas, cupo),
       aprendidas: fila?.aprendidasVencidas ?? 0,
     },
+    // Los totales son los de la colección entera, vengan o no vengan hoy: son
+    // los que enseñan los botones de categoría, y esos las traen enteras.
     total: {
-      sinAprender: enCurso + nuevas,
+      sinAprender: (fila?.sinAprenderTotal ?? 0) + nuevas,
       aprendidas: fila?.aprendidasTotal ?? 0,
     },
     biblioteca: fila?.biblioteca ?? 0,

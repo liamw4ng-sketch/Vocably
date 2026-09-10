@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TermRow } from "@/db/repository/terms";
 import { CEFR_LEVELS } from "@/lib/extraction-schema";
+import { errorDeNombreDeFuente } from "@/lib/fuentes";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
 import { Tarjeta } from "@/components/ui/Tarjeta";
@@ -168,6 +169,13 @@ export function TermTable() {
   // suficiente. No se usa `confirm()` del navegador: rompe el diseño, no se
   // puede traducir bien y en el móvil aparece pegado a la barra del sistema.
   const [porBorrar, setPorBorrar] = useState<number | null>(null);
+  // El nombre nuevo que se está escribiendo para la fuente filtrada, o null si
+  // no se está renombrando nada. Solo se puede renombrar la fuente que está
+  // filtrada: así no hace falta un control por fuente en una pantalla que ya
+  // tiene bastantes, y el usuario ve delante las palabras a las que afecta.
+  const [nombreNuevo, setNombreNuevo] = useState<string | null>(null);
+  const [errorNombre, setErrorNombre] = useState("");
+  const [renombrando, setRenombrando] = useState(false);
 
   const { search, source, level, type } = filters;
 
@@ -229,6 +237,50 @@ export function TermTable() {
       // de filtro se quedan con lo último que se supo.
     }
   }, [search, source, level, type]);
+
+  /**
+   * Cambia el nombre de la fuente que está filtrada.
+   *
+   * Al terminar mueve el filtro al nombre nuevo: dejarlo en el viejo dejaría la
+   * lista vacía y parecería que las palabras se han perdido. El efecto de
+   * `filters` recarga solo, así que aquí no hace falta pedir la lista.
+   */
+  const renombrarFuente = useCallback(async () => {
+    if (nombreNuevo === null) return;
+    const fallo = errorDeNombreDeFuente(nombreNuevo, source);
+    if (fallo) {
+      setErrorNombre(fallo);
+      return;
+    }
+
+    setRenombrando(true);
+    setErrorNombre("");
+    try {
+      const respuesta = await fetch("/api/fuentes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ titulo: source, nuevoTitulo: nombreNuevo }),
+      });
+      if (!respuesta.ok) {
+        setErrorNombre(await errorMessage(respuesta));
+        return;
+      }
+      const { titulo } = (await respuesta.json()) as { titulo: string };
+      setNombreNuevo(null);
+      setFilters((previos) => ({ ...previos, source: titulo }));
+      // Los grupos de filtro se pueblan de su propia instantánea: sin esto
+      // seguirían ofreciendo el nombre viejo hasta recargar la página.
+      try {
+        setEverything(await fetchTerms({}));
+      } catch {
+        // La carga principal ya avisa si el servidor está caído.
+      }
+    } catch {
+      setErrorNombre("No se pudo cambiar el nombre: comprueba la conexión.");
+    } finally {
+      setRenombrando(false);
+    }
+  }, [nombreNuevo, source]);
 
   function draftKey(id: number, field: EditableField) {
     return `${id}:${field}`;
@@ -355,8 +407,72 @@ export function TermTable() {
           etiqueta="Fuente"
           opciones={opcionesFuente}
           valor={source}
-          onChange={(value) => setFilters({ ...filters, source: value })}
+          onChange={(value) => {
+            // Cambiar de fuente cancela el renombrado a medias: si no, se
+            // guardaría el nombre escrito sobre una fuente que ya no es la que
+            // se está viendo.
+            setNombreNuevo(null);
+            setErrorNombre("");
+            setFilters({ ...filters, source: value });
+          }}
         />
+
+        {/* Renombrar solo la fuente filtrada, y solo cuando hay una: así se ven
+            delante las palabras a las que afecta, y la pantalla no necesita un
+            control por cada fuente. */}
+        {source && nombreNuevo === null && (
+          <Boton
+            variante="secundario"
+            className="self-start"
+            onClick={() => {
+              setNombreNuevo(source);
+              setErrorNombre("");
+            }}
+          >
+            Cambiar el nombre de «{source}»
+          </Boton>
+        )}
+
+        {source && nombreNuevo !== null && (
+          <div className="flex flex-col gap-2">
+            <Campo
+              id="nombre-de-fuente"
+              etiqueta="Nombre de la fuente"
+              value={nombreNuevo}
+              disabled={renombrando}
+              onChange={(evento: React.ChangeEvent<HTMLInputElement>) => {
+                setNombreNuevo(evento.target.value);
+                // El aviso se va al volver a escribir: mientras se teclea el
+                // campo pasa por estados a medias y señalarlos es regañar.
+                setErrorNombre("");
+              }}
+              error={errorNombre}
+              ayuda={
+                errorNombre
+                  ? undefined
+                  : "Cambia el nombre en todas las palabras que vinieron de este documento."
+              }
+            />
+            <div className="flex flex-wrap gap-2">
+              <Boton
+                disabled={renombrando || Boolean(errorDeNombreDeFuente(nombreNuevo, source))}
+                onClick={() => void renombrarFuente()}
+              >
+                {renombrando ? "Guardando…" : "Guardar"}
+              </Boton>
+              <Boton
+                variante="secundario"
+                disabled={renombrando}
+                onClick={() => {
+                  setNombreNuevo(null);
+                  setErrorNombre("");
+                }}
+              >
+                Cancelar
+              </Boton>
+            </div>
+          </div>
+        )}
         <GrupoFiltro
           etiqueta="Nivel"
           opciones={opcionesNivel}

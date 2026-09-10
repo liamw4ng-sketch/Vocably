@@ -16,7 +16,13 @@ import {
   esModo,
   type Modo,
 } from "@/lib/ajustes";
-import { crearSesion, type EnvioRespuesta, type Sesion, type Valoracion } from "@/lib/review-session";
+import {
+  crearSesion,
+  type EnvioRespuesta,
+  type Resumen,
+  type Sesion,
+  type Valoracion,
+} from "@/lib/review-session";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
 import { Tarjeta } from "@/components/ui/Tarjeta";
@@ -39,6 +45,27 @@ const VALORACIONES: BotonValoracion[] = [
   { valor: 3, etiqueta: "Bien", campo: "bien", clase: "bg-valoracion-bien" },
   { valor: 4, etiqueta: "Fácil", campo: "facil", clase: "bg-valoracion-facil" },
 ];
+
+/**
+ * Cómo va la sesión ahora mismo: cuántas veces has pulsado cada botón.
+ *
+ * Lo pidió repasando: «una especie de estadística arriba que diga cosas como el
+ * número de palabras que me han parecido difíciles... no solo al final del
+ * test». Va en el orden de los botones para que se lean en el mismo sitio en el
+ * que están, y con su mismo color.
+ *
+ * Los que están a cero se quedan fuera: un cero no informa de nada y en un móvil
+ * roba una línea que hace falta para la tarjeta.
+ */
+export function marcadorDeSesion(
+  conteo: Resumen,
+): { etiqueta: string; valor: number; clase: string }[] {
+  return VALORACIONES.filter((boton) => conteo[boton.campo] > 0).map((boton) => ({
+    etiqueta: boton.etiqueta,
+    valor: conteo[boton.campo],
+    clase: boton.clase,
+  }));
+}
 
 const ETIQUETA_TIPO: Record<string, string> = {
   word: "palabra",
@@ -250,18 +277,24 @@ export const ETIQUETA_MODO: Record<Modo, string> = {
 };
 
 /**
- * Cuántas tarjetas hay para un modo. Con el número a 0 solo cuenta lo vencido,
- * porque eso es lo único que entraría; con un número explícito cuenta también
- * lo adelantable, que es de donde saldría el resto.
+ * Cuántas tarjetas hay para un modo.
+ *
+ * Los dos botones de **categoría** enseñan la colección entera, venza hoy o no:
+ * es exactamente lo que traen al pulsarlos. Antes enseñaban solo lo vencido, y
+ * de ahí venía el «me acaba de poner que es cero» con las palabras aprendidas
+ * ya guardadas.
+ *
+ * La **mezcla** es otra cosa: es el plan del día, así que con el número a 0
+ * cuenta lo que vence y con un número cuenta también lo que se adelantaría.
  */
 export function disponibles(
   resumen: ResumenColecciones,
   modo: Modo,
   cuantas: number,
 ): number {
+  if (modo === "no-aprendidas") return resumen.total.sinAprender;
+  if (modo === "aprendidas") return resumen.total.aprendidas;
   const lado = cuantas === 0 ? resumen.hoy : resumen.total;
-  if (modo === "no-aprendidas") return lado.sinAprender;
-  if (modo === "aprendidas") return lado.aprendidas;
   return lado.sinAprender + lado.aprendidas;
 }
 
@@ -381,28 +414,6 @@ export function ajustesARecordar(
 }
 
 /**
- * Si toda la biblioteca está a medio aprender: ni vencido ahora ni adelantable
- * después, pero con palabras guardadas.
- *
- * Es lo que deja una sesión respondida entera con "Otra vez", y separa las dos
- * maneras de que `hoy` esté a cero. `total` cuenta todo lo que se puede servir,
- * adelantando incluido —en curso vencidas y nuevas por un lado, aprendidas por
- * el otro—, así que un `total` a cero con `biblioteca > 0` no deja más
- * posibilidad que ésta: lo que queda está en aprendizaje y aún no vence.
- *
- * Importa porque es justo el estado en el que "pon un número" no puede hacer
- * nada: `disponibles` mira `total` en cuanto el número no es 0, de modo que los
- * tres modos salen a (0) y desactivados por mucho que se teclee, y "Empezar"
- * se queda en gris. Con `total > 0` —una biblioteca aprendida y todavía sin
- * vencer, por ejemplo— adelantar sí funciona y hay que seguir ofreciéndolo:
- * por eso no basta con mirar `biblioteca`, como hace `bibliotecaVacia`.
- */
-export function todoEnAprendizaje(resumen: ResumenColecciones): boolean {
-  const adelantables = resumen.total.sinAprender + resumen.total.aprendidas;
-  return adelantables === 0 && resumen.biblioteca > 0;
-}
-
-/**
  * El titular de la pantalla previa y su línea de detalle.
  *
  * Fuera del JSX para poder probar la concordancia: "Hoy tienes 1 palabras" era
@@ -417,20 +428,13 @@ export function resumenLegible(resumen: ResumenColecciones): {
   const hoy = sinAprender + aprendidas;
 
   if (hoy === 0) {
-    // Las dos maneras de no tener nada para hoy se dicen distinto porque la
-    // salida es distinta: en una se puede adelantar y en la otra solo esperar.
-    if (todoEnAprendizaje(resumen)) {
-      return {
-        titulo: "Ahora mismo no toca ninguna palabra",
-        detalle:
-          "Las que estás aprendiendo vuelven en unos minutos. No hay nada que adelantar: vuelve a esta pantalla dentro de un rato.",
-      };
-    }
-
+    // Ya no hay dos casos que distinguir. Desde que los botones de categoría
+    // traen su colección entera, "hoy no toca nada" tiene siempre la misma
+    // salida: pulsar una. Antes había un segundo mensaje para la biblioteca a
+    // medio aprender, que era un callejón sin salida y ya no existe.
     return {
       titulo: "Hoy no toca ninguna palabra",
-      detalle:
-        "Estás al día. Si quieres seguir, pon un número y se adelantan las que vengan después.",
+      detalle: "Estás al día. Si quieres seguir, pulsa una categoría y te la repaso igual.",
     };
   }
 
@@ -676,6 +680,26 @@ export function SesionRepaso() {
     setEstado("cargando");
     void cargarPrevia();
   }, [cargarPrevia]);
+
+  /**
+   * Abandonar el repaso a medias.
+   *
+   * No se pierde nada: cada respuesta se manda en cuanto se pulsa el botón, así
+   * que lo contestado hasta aquí ya está guardado o de camino. Por eso se
+   * espera a `pendientes()` antes de pedir los contadores: sin esa espera, la
+   * pantalla previa enseñaría los de antes de la sesión y parecería que el
+   * trabajo no ha contado.
+   */
+  const salirDelRepaso = useCallback(() => {
+    const enMarcha = sesion;
+    if (!enMarcha) return;
+    setSesion(null);
+    setEstado("cargando");
+    void enMarcha.pendientes().then(() => {
+      if (!montadoRef.current) return;
+      void cargarPrevia();
+    });
+  }, [sesion, cargarPrevia]);
 
   /**
    * Los contadores otra vez, sin vaciar la pantalla: se usa al cambiar el tope
@@ -1000,6 +1024,7 @@ export function SesionRepaso() {
   }
 
   const { hechas, total } = sesion.progreso();
+  const marcador = marcadorDeSesion(sesion.resumen());
   const carta = sesion.cartaActual();
 
   if (!carta) {
@@ -1106,13 +1131,15 @@ export function SesionRepaso() {
   return (
     <div className="flex flex-1 flex-col gap-6">
       <header className="flex flex-col gap-2">
-        <div className="flex items-baseline justify-between gap-4">
+        <div className="flex items-center justify-between gap-4">
           <h1 style={TEXTO_1} className="text-texto-suave">
             {total === 1 ? "Hoy toca 1 tarjeta" : `Hoy tocan ${total} tarjetas`}
           </h1>
-          <p style={TEXTO_1} className="text-texto-suave tabular-nums">
-            {hechas} / {total}
-          </p>
+          {/* Arriba y pequeño, lejos de los cuatro botones de valorar: ahí abajo
+              está el pulgar, y salir sin querer de un repaso a medias enfada. */}
+          <Boton variante="secundario" className="min-h-10 px-3" onClick={salirDelRepaso}>
+            Salir
+          </Boton>
         </div>
         <div
           role="progressbar"
@@ -1123,6 +1150,24 @@ export function SesionRepaso() {
           className="h-1 w-full overflow-hidden rounded-control bg-borde"
         >
           <div className="h-full bg-acento" style={{ width: `${porcentaje}%` }} />
+        </div>
+        {/* Cómo va la sesión, sin esperar al final. Cada uno con el color de su
+            botón: es lo que los hace reconocibles de un vistazo. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p style={TEXTO_1} className="text-texto-suave tabular-nums">
+            {hechas} / {total}
+          </p>
+          {marcador.map((cuenta) => (
+            <p
+              key={cuenta.etiqueta}
+              style={TEXTO_1}
+              className="flex items-center gap-1 text-texto-suave"
+            >
+              <span aria-hidden className={`h-2 w-2 rounded-full ${cuenta.clase}`} />
+              {cuenta.etiqueta}
+              <span className="tabular-nums font-medium text-texto">{cuenta.valor}</span>
+            </p>
+          ))}
         </div>
       </header>
 

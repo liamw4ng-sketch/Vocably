@@ -9,7 +9,7 @@ import {
   applyAnswer,
   type OpcionesCola,
 } from "@/db/repository/review";
-import { cardStates, terms } from "@/db/schema";
+import { cardStates, reviewLogs, terms } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 let db: TestDb;
@@ -40,10 +40,32 @@ function termino(n: number, type = "word") {
   };
 }
 
+/**
+ * Anota una respuesta en el histórico, que es de donde sale la colección: lo
+ * que decide si una palabra está aprendida es **el botón que pulsó el usuario**,
+ * no el estado del programador. Sin esta fila, tocar `card_states` a mano deja
+ * una palabra que sigue siendo "nueva" para la cola.
+ *
+ * `state` es el estado ANTERIOR a la respuesta, y se deja en 2 a propósito:
+ * `introducidasHoy` solo cuenta las filas con 0, así que estas no gastan cupo.
+ */
+async function anotarRespuesta(termId: number, rating: 1 | 2 | 3 | 4, cuando: Date) {
+  await db.insert(reviewLogs).values({
+    answerId: `prueba-${termId}-${cuando.getTime()}-${rating}`,
+    termId,
+    rating,
+    state: 2,
+    stability: 1,
+    difficulty: 5,
+    reviewedAt: cuando,
+  });
+}
+
 /** Deja esos términos como palabras ya aprendidas y vencidas desde hace días. */
 async function madurar(termIds: number[], due = new Date("2026-09-08T09:00:00Z")) {
   for (const termId of termIds) {
     await db.update(cardStates).set({ state: 2, reps: 3, due }).where(eq(cardStates.termId, termId));
+    await anotarRespuesta(termId, 3, new Date("2026-09-07T09:00:00Z"));
   }
 }
 
@@ -54,12 +76,14 @@ async function enAprendizaje(termIds: number[]) {
       .update(cardStates)
       .set({ state: 1, reps: 1, due: new Date("2026-09-10T08:50:00Z") })
       .where(eq(cardStates.termId, termId));
+    await anotarRespuesta(termId, 1, new Date("2026-09-10T08:40:00Z"));
   }
 }
 
 /** Deja esos términos como aprendidas que aún NO vencen. */
 async function aprendidaFutura(termId: number, due: Date) {
   await db.update(cardStates).set({ state: 2, reps: 3, due }).where(eq(cardStates.termId, termId));
+  await anotarRespuesta(termId, 3, new Date("2026-09-07T09:00:00Z"));
 }
 
 /**
@@ -124,22 +148,17 @@ describe("getDueQueue", () => {
     await saveExtraction(db, { ...base, items: [termino(1), termino(2), termino(3)] });
     await setNewCardsPerDay(db, 1);
     // palabra1 pasa a estar vencida: ya no es nueva
-    await db
-      .update(cardStates)
-      .set({ state: 2, reps: 3, due: new Date("2026-09-09T09:00:00Z") })
-      .where(eq(cardStates.termId, 1));
+    await madurar([1], new Date("2026-09-09T09:00:00Z"));
 
     const cola = await cartasDe({ now: AHORA });
     expect(cola.filter((c) => !c.esNueva)).toHaveLength(1);
     expect(cola.filter((c) => c.esNueva)).toHaveLength(1);
   });
 
+  /** Con el modo por defecto ("mezcla"), que es el plan del día. */
   it("excluye lo que aún no vence", async () => {
     await saveExtraction(db, { ...base, items: [termino(1)] });
-    await db
-      .update(cardStates)
-      .set({ state: 2, reps: 3, due: new Date("2026-12-01T00:00:00Z") })
-      .where(eq(cardStates.termId, 1));
+    await aprendidaFutura(1, new Date("2026-12-01T00:00:00Z"));
 
     expect(await cartasDe({ now: AHORA })).toHaveLength(0);
   });
@@ -291,12 +310,7 @@ describe("getDueQueue", () => {
   it("lo vencido llega entero aunque el cupo de nuevas esté gastado", async () => {
     await saveExtraction(db, { ...base, items: Array.from({ length: 10 }, (_, i) => termino(i)) });
     // Tres términos maduros y vencidos desde hace días.
-    for (const termId of [1, 2, 3]) {
-      await db
-        .update(cardStates)
-        .set({ state: 2, reps: 3, due: new Date("2026-09-08T09:00:00Z") })
-        .where(eq(cardStates.termId, termId));
-    }
+    await madurar([1, 2, 3]);
     await setNewCardsPerDay(db, 2);
 
     const primera = await cartasDe({ now: AHORA });
@@ -523,6 +537,7 @@ describe("las en curso vencidas que la sesión deja fuera", () => {
       .update(cardStates)
       .set({ state: 1, reps: 1, due: new Date("2026-09-11T09:00:00Z") })
       .where(eq(cardStates.termId, termIds[1]));
+    await anotarRespuesta(termIds[1], 1, new Date("2026-09-10T08:40:00Z"));
 
     const cola = await getDueQueue(db, { now: AHORA, modo: "mezcla", cuantas: 0 });
 
@@ -546,13 +561,27 @@ describe("adelantar aprendidas con un tamaño de sesión", () => {
     expect(cartas.map((c) => c.termId)).toEqual([termIds[0]]);
   });
 
-  it("y NO entra con el número a 0, que promete no adelantar nada", async () => {
+  /**
+   * Pedir la categoría a propósito la trae entera, venza o no. Lo pidió al
+   * usarlo: «la categoría aprendidas también se puede volver a testear con
+   * flashcards si es necesario». Antes esto devolvía una sesión vacía y el
+   * botón salía en gris.
+   */
+  it("y también entra con el número a 0: pedir la categoría la trae entera", async () => {
     const { termIds } = await guardarConIds([termino(1)]);
     await aprendidaFutura(termIds[0], new Date("2026-09-20T09:00:00Z"));
 
     const cartas = await cartasDe({ now: AHORA, modo: "aprendidas", cuantas: 0 });
 
-    expect(cartas).toEqual([]);
+    expect(cartas.map((c) => c.termId)).toEqual([termIds[0]]);
+  });
+
+  /** La mezcla sí sigue siendo el plan del día: con el número a 0 no adelanta. */
+  it("la mezcla con el número a 0 sigue sin adelantar nada", async () => {
+    const { termIds } = await guardarConIds([termino(1)]);
+    await aprendidaFutura(termIds[0], new Date("2026-09-20T09:00:00Z"));
+
+    expect(await cartasDe({ now: AHORA, modo: "mezcla", cuantas: 0 })).toEqual([]);
   });
 
   it("se adelanta la más próxima primero", async () => {

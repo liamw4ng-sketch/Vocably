@@ -1,18 +1,32 @@
-import { State } from "ts-fsrs";
 import type { Modo } from "@/lib/ajustes";
 import { barajar } from "@/lib/barajar";
 
 export type Coleccion = "no-aprendidas" | "aprendidas";
 
 /**
- * A qué colección pertenece una carta según su estado FSRS.
- *
- * Solo `Review` cuenta como aprendida. `Relearning` es una palabra que
- * superaste y luego fallaste: la sabías, ya no, y por eso baja. Meterla en
- * "aprendidas" haría que elegir esa colección trajera justo las que no sabes.
+ * A partir de qué botón de la tarjeta se considera aprendida una palabra:
+ * "Bien" (3) y "Fácil" (4) sí, "Otra vez" (1) y "Difícil" (2) no.
  */
-export function coleccionDe(state: number): Coleccion {
-  return state === State.Review ? "aprendidas" : "no-aprendidas";
+export const APRENDIDA_DESDE = 3;
+
+/**
+ * A qué colección pertenece una carta, según **la última respuesta del
+ * usuario** en esa palabra.
+ *
+ * Antes miraba el estado del programador FSRS, y esa era la decisión
+ * equivocada: a FSRS le da igual qué botón pulses, así que una palabra
+ * respondida "Difícil" acababa en "aprendidas" exactamente igual que una
+ * "Fácil". Él lo dijo con sus palabras al usarlo: «si digo que es fácil o ya me
+ * lo sé, pues se va en la categoría de aprendidas», y las difíciles «allí se
+ * quedan aún en no aprendidas».
+ *
+ * `null` es una palabra que todavía no has respondido nunca. Es nueva, y una
+ * palabra nueva no está aprendida.
+ */
+export function coleccionDe(ultimaValoracion: number | null): Coleccion {
+  return ultimaValoracion !== null && ultimaValoracion >= APRENDIDA_DESDE
+    ? "aprendidas"
+    : "no-aprendidas";
 }
 
 export type Grupos<T> = {
@@ -24,6 +38,12 @@ export type Grupos<T> = {
    */
   enCurso: T[];
   nuevas: T[];
+  /**
+   * Sin aprender y todavía sin vencer: falladas hace un rato que el programador
+   * ha puesto para dentro de unos minutos. **Ya ordenadas por fecha ascendente.**
+   * Solo entran cuando se pide expresamente la categoría "No aprendidas".
+   */
+  noAprendidasFuturas: T[];
   aprendidasVencidas: T[];
   /** Aprendidas que aún no vencían, **ya ordenadas por fecha ascendente**. */
   aprendidasFuturas: T[];
@@ -80,20 +100,25 @@ export function componerSesion<T>(
   const sinRecorte = cuantas === 0;
 
   const nuevas = sinRecorte ? grupos.nuevas.slice(0, limiteNuevas) : grupos.nuevas;
-  // Adelantar es exactamente lo que `cuantas = 0` promete no hacer.
-  const futuras = sinRecorte ? [] : grupos.aprendidasFuturas;
+  // En la mezcla, adelantar es exactamente lo que `cuantas = 0` promete no
+  // hacer: es el plan del día. Pero pedir una categoría a propósito es otra
+  // cosa —«la categoría aprendidas también se puede volver a testear si es
+  // necesario»—, y ahí sí entran enteras.
+  const enLaMezcla = modo === "mezcla";
+  const futurasAprendidas = enLaMezcla && sinRecorte ? [] : grupos.aprendidasFuturas;
 
   const enCurso: Tramo<T> = { cartas: grupos.enCurso, sortear: true };
   const vencidas: Tramo<T> = { cartas: grupos.aprendidasVencidas, sortear: true };
-  // Las adelantadas son el único grupo que conserva su orden, y no es capricho:
-  // vienen ordenadas por fecha de vencimiento, y es eso lo que hace que
-  // adelantar dos días seguidos no traiga las mismas palabras.
-  const porVenir: Tramo<T> = { cartas: futuras, sortear: false };
+  // Las que aún no tocan son el único grupo que conserva su orden, y no es
+  // capricho: vienen ordenadas por fecha de vencimiento, y es eso lo que hace
+  // que adelantar dos días seguidos no traiga las mismas palabras.
+  const porVenir: Tramo<T> = { cartas: futurasAprendidas, sortear: false };
+  const porVolver: Tramo<T> = { cartas: grupos.noAprendidasFuturas, sortear: false };
   const sinAprender: Tramo<T> = { cartas: nuevas, sortear: true };
 
   const tramos: Tramo<T>[] =
     modo === "no-aprendidas"
-      ? [enCurso, sinAprender]
+      ? [enCurso, sinAprender, porVolver]
       : modo === "aprendidas"
         ? [vencidas, porVenir]
         : [enCurso, vencidas, sinAprender, porVenir];

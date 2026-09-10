@@ -96,3 +96,38 @@ export async function updateTerm(
 export async function deleteTerm(db: Database, id: number): Promise<void> {
   await db.delete(terms).where(eq(terms.id, id));
 }
+
+/**
+ * Cambia el nombre de una fuente, y con él el de todas sus palabras.
+ *
+ * Lo pidió con un ejemplo suyo: «fake_news.pdf, si las palabras asociadas a ese
+ * documento quiero cambiar el nombre por ejemplo a simplemente fake».
+ *
+ * **Renombra por título, no por id**, porque el mismo documento extraído dos
+ * veces son dos filas de `sources` con el mismo título — así es también como
+ * filtra `listTerms`, y por la misma razón: para el usuario es un documento.
+ * Renombrar solo una dejaría la mitad de sus palabras con el nombre viejo.
+ *
+ * Ponerle el nombre de otra fuente que ya existe no es un error: es fundir dos
+ * documentos en uno, que es una cosa que se querrá hacer. Devuelve cuántas
+ * filas se renombraron; 0 significa que ese título no existía.
+ */
+export async function renombrarFuente(
+  db: Database,
+  titulo: string,
+  nuevoTitulo: string,
+): Promise<number> {
+  const nuevo = nuevoTitulo.trim();
+  if (!nuevo) {
+    // Sin nombre, la fuente desaparecería del filtro y sus palabras con ella:
+    // seguirían en la biblioteca, pero sin manera de llegar a ellas por ahí.
+    throw new Error("El nombre de la fuente no puede quedarse vacío.");
+  }
+
+  const filas = await db
+    .update(sources)
+    .set({ title: nuevo })
+    .where(eq(sources.title, titulo))
+    .returning({ id: sources.id });
+  return filas.length;
+}

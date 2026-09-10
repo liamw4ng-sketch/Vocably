@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "@/tests/helpers/test-db";
 import { saveExtraction } from "@/db/repository/extraction";
 import { setNewCardsPerDay, setSessionMode, setSessionSize } from "@/db/repository/settings";
-import { cardStates } from "@/db/schema";
+import { cardStates, reviewLogs } from "@/db/schema";
 
 let db: TestDb;
 let closeDb: () => Promise<void>;
@@ -66,6 +66,17 @@ describe("GET /api/repaso/cola", () => {
       .update(cardStates)
       .set({ state: 2, reps: 3, due: new Date("2030-01-01T00:00:00.000Z") })
       .where(eq(cardStates.termId, 1));
+    // La colección sale de la última respuesta del usuario, no del estado del
+    // programador: sin esta fila la palabra seguiría siendo "nueva".
+    await db.insert(reviewLogs).values({
+      answerId: "prueba-aprendida-lejana",
+      termId: 1,
+      rating: 3,
+      state: 2,
+      stability: 1,
+      difficulty: 5,
+      reviewedAt: new Date("2026-09-01T09:00:00.000Z"),
+    });
 
     // Si la ruta confiara en `?now=` para calcular la fecha, pedir la cola con
     // un instante posterior a 2030 haría que esta tarjeta pareciera vencida
