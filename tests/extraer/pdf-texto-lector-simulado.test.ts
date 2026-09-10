@@ -22,7 +22,13 @@ vi.mock("pdfjs-dist", () => ({
           return Promise.reject(new Error("corrupt content stream"));
         }
         return Promise.resolve({
-          getTextContent: () => Promise.resolve({ items: [] }),
+          // Un flujo que se acaba enseguida: a estas dos pruebas no les importa
+          // el texto, solo que la página se lea sin reventar.
+          streamTextContent: () => ({
+            getReader: () => ({
+              read: () => Promise.resolve({ done: true, value: undefined }),
+            }),
+          }),
         });
       },
     }),

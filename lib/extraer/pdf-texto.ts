@@ -68,12 +68,7 @@ export async function textoDePaginas(
     // cifrado o corrupto, así que merece su propio mensaje en vez de
     // compartir uno que hablaría de "el PDF" en general.
     try {
-      const contenido = await (await documento.getPage(pagina)).getTextContent();
-      trozos.push(
-        contenido.items
-          .map((item) => ("str" in item ? item.str : ""))
-          .join(" "),
-      );
+      trozos.push(await textoDeUnaPagina(await documento.getPage(pagina)));
     } catch (error) {
       const detalle = error instanceof Error ? error.message : "";
       throw new Error(
@@ -83,4 +78,40 @@ export async function textoDePaginas(
   }
 
   return trozos.join("\n");
+}
+
+/** Un trozo de texto tal como lo entrega el lector: sus fragmentos y poco más. */
+type TrozoDeTexto = { items: { str?: string }[] };
+
+/**
+ * El texto de una página, leyendo el flujo **a mano** con su lector.
+ *
+ * La función cómoda del lector, `getTextContent()`, hace lo mismo pero
+ * recorriendo el flujo con `for await (… of …)`. Iterar así un `ReadableStream`
+ * es una API que Safari tardó años en traer, mucho después que el resto: en el
+ * iPhone del usuario reventaba con «undefined is not a function», y como el
+ * fallo saltaba al analizar la página, la pantalla acusaba de estar dañado a un
+ * PDF perfectamente sano. `getReader()` funciona en todas partes desde siempre.
+ *
+ * **No vuelvas a `getTextContent()`.** Lee tres líneas menos y deja fuera a
+ * quien no tenga el móvil al día, que es justo donde se usa esto.
+ *
+ * Los fragmentos sin `str` (marcas de estructura del PDF, no texto) cuentan
+ * como cadena vacía en vez de saltarse: así siguen separando lo que tenían a
+ * los lados, que es lo que hacía la función cómoda.
+ */
+async function textoDeUnaPagina(pagina: {
+  streamTextContent: () => ReadableStream;
+}): Promise<string> {
+  const lector = pagina.streamTextContent().getReader();
+  const partes: string[] = [];
+  for (;;) {
+    const { done, value } = (await lector.read()) as {
+      done: boolean;
+      value?: TrozoDeTexto;
+    };
+    if (done) break;
+    for (const item of value?.items ?? []) partes.push(item.str ?? "");
+  }
+  return partes.join(" ");
 }
