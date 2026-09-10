@@ -13,6 +13,7 @@ import {
   mensajeVencidosFuera,
   ajustesARecordar,
   ETIQUETA_MODO,
+  lineaDeColecciones,
 } from "@/components/SesionRepaso";
 import { MODOS, MAXIMO_TAMANO_SESION } from "@/lib/ajustes";
 import { componerSesion } from "@/lib/repaso/coleccion";
@@ -430,5 +431,46 @@ describe("ETIQUETA_MODO", () => {
     expect(ETIQUETA_MODO["no-aprendidas"]).toBe("No aprendidas");
     expect(ETIQUETA_MODO.aprendidas).toBe("Aprendidas");
     expect(ETIQUETA_MODO.mezcla).toBe("Mezcla");
+  });
+});
+
+describe("lineaDeColecciones", () => {
+  /**
+   * El usuario creyó que las palabras no pasaban nunca a "aprendidas": tenía 31
+   * aprendidas y el botón marcaba 0, porque ese número es solo lo que vence hoy.
+   * Los dos números juntos, y deja de parecer roto lo que funciona.
+   */
+  it("dice el total de las dos colecciones, no solo lo de hoy", () => {
+    expect(lineaDeColecciones(resumen({ sinAprender: 20, aprendidas: 0 }, { sinAprender: 20, aprendidas: 31 }))).toBe(
+      "En total tienes 31 aprendidas y 20 sin aprender.",
+    );
+  });
+
+  it("concuerda en singular", () => {
+    expect(lineaDeColecciones(resumen({ sinAprender: 1, aprendidas: 1 }))).toBe(
+      "En total tienes 1 aprendida y 1 sin aprender.",
+    );
+  });
+
+  it("sin ninguna aprendida solo habla de las que faltan", () => {
+    expect(lineaDeColecciones(resumen({ sinAprender: 7, aprendidas: 0 }))).toBe(
+      "En total tienes 7 sin aprender.",
+    );
+  });
+
+  it("con todo aprendido solo habla de las aprendidas", () => {
+    expect(lineaDeColecciones(resumen({ sinAprender: 0, aprendidas: 4 }))).toBe(
+      "En total tienes 4 aprendidas.",
+    );
+  });
+
+  /**
+   * Una biblioteca entera a medio aprender da los dos totales a cero, y sin
+   * esto la línea diría "En total tienes." La pantalla ya lo cuenta en su
+   * titular, así que aquí se calla.
+   */
+  it("se calla cuando no hay nada que contar", () => {
+    expect(lineaDeColecciones(resumen({ sinAprender: 0, aprendidas: 0 }, undefined, 9))).toBe("");
+    expect(lineaDeColecciones(resumen({ sinAprender: 0, aprendidas: 0 }, undefined, 0))).toBe("");
   });
 });

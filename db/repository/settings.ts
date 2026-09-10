@@ -1,10 +1,11 @@
 import { eq } from "drizzle-orm";
 import { settings } from "@/db/schema";
 import type { Database } from "@/db/types";
-import { esModo, MODO_POR_DEFECTO, type Modo } from "@/lib/ajustes";
+import { esModo, MODO_POR_DEFECTO, SIN_TOPE_DE_NUEVAS, type Modo } from "@/lib/ajustes";
 
 const FILA = 1;
-export const TOPE_POR_DEFECTO = 20;
+/** Sin tope. Ver `SIN_TOPE_DE_NUEVAS` en `lib/ajustes.ts` para el porqué. */
+export const TOPE_POR_DEFECTO = SIN_TOPE_DE_NUEVAS;
 /** 0 significa "las que toquen hoy": la app no recorta por su cuenta. */
 export const TAMANO_SESION_POR_DEFECTO = 0;
 

@@ -25,9 +25,10 @@ function patch(body: unknown) {
 }
 
 describe("/api/ajustes", () => {
-  it("devuelve 20 por defecto", async () => {
+  /** 0 es "sin tope": el freno de nuevas viene apagado. */
+  it("devuelve el tope apagado por defecto", async () => {
     const res = await GET();
-    expect((await res.json()).newCardsPerDay).toBe(20);
+    expect((await res.json()).newCardsPerDay).toBe(0);
   });
 
   it("cambia el tope y lo persiste", async () => {

@@ -10,6 +10,28 @@
  * propósito: que siga así.
  */
 
+/**
+ * El tope de tarjetas nuevas al día está **apagado** con este valor, igual que
+ * el 0 del tamaño de sesión significa «las que toquen hoy».
+ *
+ * Es lo que pidió el usuario después de usarlo: el tope venía puesto en 20 sin
+ * que él lo eligiera, y se comía en silencio todo lo que añadía a la biblioteca
+ * —«las palabras que se agregan no se van a repaso»—. Como ya puede decir
+ * cuántas palabras quiere en cada sesión, un segundo freno que nadie ve sobraba.
+ */
+export const SIN_TOPE_DE_NUEVAS = 0;
+
+/**
+ * Cuántas tarjetas nuevas pueden entrar todavía hoy.
+ *
+ * Devuelve infinito cuando no hay tope: quien lo llama recorta con un `slice`,
+ * y `slice(0, Infinity)` es exactamente «todas», sin ningún caso especial.
+ */
+export function cupoDeNuevas(tope: number, introducidasHoy: number): number {
+  if (tope === SIN_TOPE_DE_NUEVAS) return Number.POSITIVE_INFINITY;
+  return Math.max(0, tope - introducidasHoy);
+}
+
 /** Tope máximo de tarjetas nuevas al día: un valor por encima de esto ya no
  * es una preferencia razonable, es un error de digitación. Lo valida
  * `app/api/ajustes/route.ts` y lo usa como límite del control del cliente

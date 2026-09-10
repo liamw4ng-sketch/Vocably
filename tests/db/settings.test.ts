@@ -21,8 +21,9 @@ afterEach(async () => {
 });
 
 describe("ajustes", () => {
-  it("sin fila guardada devuelve 20 por defecto", async () => {
-    expect(await getNewCardsPerDay(db)).toBe(20);
+  /** El tope viene apagado: 0 significa "sin tope", como el 0 del tamaño de sesión. */
+  it("sin fila guardada no hay tope de nuevas", async () => {
+    expect(await getNewCardsPerDay(db)).toBe(0);
   });
 
   it("guarda y recupera un valor nuevo", async () => {
