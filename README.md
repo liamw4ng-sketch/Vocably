@@ -154,6 +154,11 @@ que hace falta (`POST /api/terms`, vía `anadirDesdeDiccionario`). Así la
 biblioteca puede filtrar entre lo buscado a mano y lo extraído de un PDF, sin
 tener que tocar el esquema de `sources` para distinguirlos.
 
+Solo lo buscado a mano. Extraer sin IA pasa por la misma función, pero manda
+el título y el rango de páginas que eligió el usuario y abre **su propia
+fuente**, como hace la extracción con IA: colgarlo del "Diccionario" borraría
+justamente la distinción que esa fuente existe para mantener.
+
 ### El traductor
 
 El diccionario en sí (ver "Cargar el diccionario" más abajo) trae español en
@@ -223,6 +228,30 @@ DATABASE_URL='...' npm run cargar:espanol -- ~/Vocably-diccionario/dicc_es.jsonl
 
 Es idempotente: volver a cargarlo actualiza en vez de duplicar, y no toca las
 traducciones que ya trajo MyMemory.
+
+### Los niveles del MCER
+
+El nivel de cada palabra sale del **CEFR-J Vocabulary Profile 1.5**, compilado por
+Yukio Tono (Tokyo University of Foreign Studies), más el **Octanove Vocabulary
+Profile C1/C2 1.0** de Octanove Labs, publicados juntos en
+[Open Language Profiles](https://github.com/openlanguageprofiles/olp-en-cefrj).
+
+El CEFR-J se puede usar con fines comerciales y no comerciales sin coste,
+citándolo; el copyright es de Tono Laboratory. El complemento Octanove está bajo
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
+Se obtienen y se cargan así:
+
+```bash
+cd ~/Vocably-diccionario
+curl -sO https://raw.githubusercontent.com/openlanguageprofiles/olp-en-cefrj/master/cefrj-vocabulary-profile-1.5.csv
+curl -sO https://raw.githubusercontent.com/openlanguageprofiles/olp-en-cefrj/master/octanove-vocabulary-profile-c1c2-1.0.csv
+cat cefrj-vocabulary-profile-1.5.csv octanove-vocabulary-profile-c1c2-1.0.csv > cefr.csv
+
+DATABASE_URL='...' npm run cargar:niveles -- ~/Vocably-diccionario/cefr.csv
+```
+
+Son unas 9.900 entradas. Es idempotente: recargarlo actualiza en vez de duplicar.
 
 ## En local
 

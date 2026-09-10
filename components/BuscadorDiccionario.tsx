@@ -4,6 +4,10 @@ import { useState } from "react";
 import { CEFR_LEVELS } from "@/lib/extraction-schema";
 import { formatearPlazo } from "@/lib/plazo";
 import { agruparPorCategoria } from "@/lib/diccionario/categoria";
+import {
+  sinEspanolEnNingunOrigen,
+  traduccionParaGuardar,
+} from "@/lib/diccionario/traduccion";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
 import { Tarjeta } from "@/components/ui/Tarjeta";
@@ -155,39 +159,11 @@ export function significadosDeLaAcepcion(
 }
 
 /**
- * Qué español se guarda en la tarjeta, por orden de precisión: lo escrito a
- * mano, lo de la acepción, lo de la palabra.
- *
- * Los dos primeros escalones son los de siempre. El tercero es nuevo y solo
- * añade salidas donde antes no había ninguna: sin él, una palabra cuyo español
- * solo esté a nivel de palabra no se podría añadir sin escribirlo a mano o
- * pagar por afinar.
- *
- * Del español de la palabra se guarda **solo el primero**. `deLaPalabra` son
- * hasta cinco definiciones enteras del Wikcionario español, con su punto
- * final y sus comas internas, no equivalentes cortos como los de
- * `deLaAcepcion`: unirlas con `.join(", ")` dejaba reversos como
- * "Idioma., Lengua, lenguaje., Léxico, jerga, vocabulario., …", que es
- * justamente lo que el usuario tendría que estudiar durante meses.
+ * La escalera del español —`traduccionParaGuardar` y `sinEspanolEnNingunOrigen`—
+ * vive en `lib/diccionario/traduccion.ts`: la comparte con la pantalla de
+ * extraer sin IA, que guarda por el mismo criterio pero cuarenta palabras de
+ * golpe. Sus pruebas siguen en `tests/diccionario/traduccion.test.ts`.
  */
-export function traduccionParaGuardar(
-  manual: string,
-  deLaAcepcion: string[],
-  deLaPalabra: string[],
-): string {
-  return manual.trim() || deLaAcepcion.join(", ") || deLaPalabra[0] || "";
-}
-
-/**
- * Si a esta acepción no le llegó español de ningún origen automático: ni el
- * suyo propio (`dictionary_entries.translations`, el volcado inglés o afinar
- * con IA) ni el de su palabra (`spanish_meanings`, Wikcionario o MyMemory).
- * No mira lo escrito a mano: ese campo sigue disponible igual, y este aviso
- * explica por qué hace falta antes de que el usuario lo rellene.
- */
-export function sinEspanolEnNingunOrigen(deLaAcepcion: string[], deLaPalabra: string[]): boolean {
-  return deLaAcepcion.length === 0 && deLaPalabra.length === 0;
-}
 
 /**
  * Si el botón "Añadir" debe estar deshabilitado: sin nivel, sin nada de español
