@@ -6,8 +6,12 @@ import {
   botonAnadirDeshabilitado,
   cuandoTocaRepasar,
   afinarConIA,
-  etiquetaDeOrigen,
-  significadosDeLaAcepcion,
+  entradaParaGuardar,
+  botonAfinarDeshabilitado,
+  conTraduccionesAfinadas,
+  traduccionSeleccionadaTrasAfinar,
+  significadosNumerados,
+  traduccionMarcada,
 } from "@/components/BuscadorDiccionario";
 
 const acepcion = {
@@ -15,7 +19,7 @@ const acepcion = {
   term: "bank",
   pos: "noun",
   gloss: "An edge of a river.",
-  example: "We sat on the bank.",
+  example: "They sat on the bank.",
   translations: ["orilla"],
   yaGuardada: false,
 };
@@ -135,62 +139,6 @@ describe("afinarConIA", () => {
   });
 });
 
-describe("etiquetaDeOrigen", () => {
-  /**
-   * Uno es un diccionario escrito por personas y el otro una máquina.
-   * Enseñarlos igual sería mentir sobre lo que se está leyendo.
-   */
-  it("distingue el diccionario de la traducción automática", () => {
-    expect(etiquetaDeOrigen("wikcionario-es")).toBe("Wikcionario español");
-    expect(etiquetaDeOrigen("mymemory")).toBe("traducción automática");
-  });
-
-  it("un origen desconocido sale tal cual en vez de en blanco", () => {
-    expect(etiquetaDeOrigen("otro")).toBe("otro");
-  });
-});
-
-describe("significadosDeLaAcepcion", () => {
-  const significados = [
-    { pos: "noun", nombre: "Sustantivo", meanings: ["Perro."], source: "wikcionario-es" },
-    { pos: "verb", nombre: "Verbo", meanings: ["Acosar."], source: "wikcionario-es" },
-  ];
-
-  it("da los de su categoría", () => {
-    expect(significadosDeLaAcepcion(significados, "verb")).toEqual(["Acosar."]);
-  });
-
-  /**
-   * MyMemory no dice de qué categoría habla, así que su grupo vale para
-   * cualquier acepción: es el único español que hay.
-   */
-  it("si no hay de su categoría, cae en el grupo sin categoría", () => {
-    const soloMyMemory = [{ pos: "", nombre: "", meanings: ["rechazar"], source: "mymemory" }];
-    expect(significadosDeLaAcepcion(soloMyMemory, "verb")).toEqual(["rechazar"]);
-  });
-
-  it("sin nada que valga, devuelve vacío", () => {
-    expect(significadosDeLaAcepcion(significados, "adj")).toEqual([]);
-    expect(significadosDeLaAcepcion([], "noun")).toEqual([]);
-  });
-
-  /**
-   * Con las dos a la vez —su categoría y la vacía, con significados
-   * distintos— tiene que ganar la propia: la vacía es solo el recurso para
-   * cuando no hay nada más específico, no la primera opción. Una
-   * implementación que mirase primero el grupo vacío pasaría las otras tres
-   * pruebas igual (ninguna presenta ambos grupos a la vez) y solo esta la
-   * delata.
-   */
-  it("con su categoría y también un grupo sin categoría, gana el de su categoría", () => {
-    const conAmbos = [
-      { pos: "verb", nombre: "Verbo", meanings: ["Acosar."], source: "wikcionario-es" },
-      { pos: "", nombre: "", meanings: ["rechazar"], source: "mymemory" },
-    ];
-    expect(significadosDeLaAcepcion(conAmbos, "verb")).toEqual(["Acosar."]);
-  });
-});
-
 describe("cuandoTocaRepasar", () => {
   const ahora = new Date("2026-09-08T10:00:00Z");
 
@@ -221,20 +169,175 @@ describe("avisoSinAcepciones", () => {
   });
 });
 
+describe("entradaParaGuardar", () => {
+  /**
+   * El significado inglés elegido es lo que se guarda como pista, y es lo único
+   * que distingue `bank`→orilla de `bank`→banco en la biblioteca.
+   */
+  it("guarda el significado elegido como pista, no otro", () => {
+    const e = entradaParaGuardar(acepcion, "orilla", "B2");
+    expect(e.term).toBe("bank");
+    expect(e.gloss).toBe("An edge of a river.");
+    expect(e.pos).toBe("noun");
+    expect(e.example).toBe("They sat on the bank.");
+  });
+
+  it("guarda la traducción elegida, venga de donde venga", () => {
+    expect(entradaParaGuardar(acepcion, "ribera", "B2").translation).toBe("ribera");
+  });
+
+  it("recorta la traducción escrita a mano", () => {
+    expect(entradaParaGuardar(acepcion, "  ribera  ", "B2").translation).toBe("ribera");
+  });
+
+  it("guarda el nivel elegido", () => {
+    expect(entradaParaGuardar(acepcion, "orilla", "C1").level).toBe("C1");
+  });
+});
+
 describe("botonAnadirDeshabilitado", () => {
-  it("hace falta nivel y alguna traducción", () => {
-    expect(botonAnadirDeshabilitado("", "perro", false)).toBe(true);
-    expect(botonAnadirDeshabilitado("B2", "", false)).toBe(true);
-    expect(botonAnadirDeshabilitado("B2", "   ", false)).toBe(true);
-    expect(botonAnadirDeshabilitado("B2", "perro", false)).toBe(false);
+  /** Las tres elecciones son obligatorias: sin una de ellas no hay tarjeta que guardar. */
+  it("hacen falta significado, traducción y nivel", () => {
+    expect(botonAnadirDeshabilitado(null, "orilla", "B2", false)).toBe(true);
+    expect(botonAnadirDeshabilitado(acepcion, "", "B2", false)).toBe(true);
+    expect(botonAnadirDeshabilitado(acepcion, "   ", "B2", false)).toBe(true);
+    expect(botonAnadirDeshabilitado(acepcion, "orilla", "", false)).toBe(true);
+    expect(botonAnadirDeshabilitado(acepcion, "orilla", "B2", false)).toBe(false);
   });
 
   /**
-   * Con la petición en vuelo se deshabilita: dos clics mandarían dos POST antes
-   * de que la pantalla oculte el botón.
+   * Con la petición en vuelo se deshabilita: dos toques mandarían dos POST antes
+   * de que la pantalla se entere del primero.
    */
   it("con la petición en vuelo, deshabilitado", () => {
-    expect(botonAnadirDeshabilitado("B2", "perro", true)).toBe(true);
+    expect(botonAnadirDeshabilitado(acepcion, "orilla", "B2", true)).toBe(true);
+  });
+});
+
+describe("conTraduccionesAfinadas", () => {
+  /**
+   * Lo que devuelve el botón de pago va delante: es la traducción curada de la
+   * acepción concreta que el usuario eligió, así que es la mejor de la lista.
+   */
+  it("mete lo afinado al principio", () => {
+    expect(conTraduccionesAfinadas(["banco", "Banco."], ["orilla"])).toEqual([
+      "orilla",
+      "banco",
+      "Banco.",
+    ]);
+  });
+
+  it("no duplica lo que ya estaba", () => {
+    expect(conTraduccionesAfinadas(["banco"], ["Banco", "orilla"])).toEqual(["orilla", "banco"]);
+  });
+
+  it("sin nada afinado deja la lista como estaba", () => {
+    expect(conTraduccionesAfinadas(["banco"], [])).toEqual(["banco"]);
+  });
+
+  /**
+   * `traduccionesPosibles` deduplica también dentro de un mismo grupo: si
+   * `lista` trae dos formas equivalentes, el primer grupo no sobrevive con
+   * `lista.length` elementos. Cortar por esa longitud a ciegas se comería
+   * traducciones afinadas de verdad — aquí, "orilla" es lo único que costó
+   * dinero, y no puede perderse.
+   */
+  it("no se come lo afinado cuando la lista trae dos formas equivalentes", () => {
+    expect(conTraduccionesAfinadas(["banco", "Banco"], ["orilla"])).toEqual([
+      "orilla",
+      "banco",
+      "Banco",
+    ]);
+  });
+});
+
+describe("traduccionSeleccionadaTrasAfinar", () => {
+  /**
+   * El caso que dejaba la pantalla sin ningún radio marcado: si lo que
+   * devuelve la IA ya estaba en la lista salvo por mayúsculas o espacios,
+   * `conTraduccionesAfinadas` conserva la forma vieja, no la de la IA.
+   * Seleccionar la forma de la IA no casaría con ningún `t` de la lista
+   * pintada; hay que seleccionar la que de verdad sobrevive.
+   */
+  it("si lo afinado ya estaba, selecciona la forma que sobrevive, no la que devolvió la IA", () => {
+    expect(traduccionSeleccionadaTrasAfinar(["banco"], ["Banco", "orilla"])).toBe("orilla");
+  });
+
+  it("si lo afinado es genuinamente nuevo, lo selecciona a él", () => {
+    expect(traduccionSeleccionadaTrasAfinar(["banco"], ["ribera"])).toBe("ribera");
+  });
+
+  it("sin nada afinado, selecciona lo primero que ya había", () => {
+    expect(traduccionSeleccionadaTrasAfinar(["banco"], [])).toBe("banco");
+  });
+});
+
+describe("botonAfinarDeshabilitado", () => {
+  /**
+   * Afinar pide a Claude la traducción de UNA acepción concreta: sin significado
+   * elegido no hay nada que afinar, y es el único botón que cuesta dinero.
+   */
+  it("hace falta un significado elegido", () => {
+    expect(botonAfinarDeshabilitado(null, false)).toBe(true);
+    expect(botonAfinarDeshabilitado(acepcion, false)).toBe(false);
+  });
+
+  it("con la petición en vuelo, deshabilitado", () => {
+    expect(botonAfinarDeshabilitado(acepcion, true)).toBe(true);
+  });
+});
+
+describe("significadosNumerados", () => {
+  /**
+   * §7: esconder un significado ya guardado cambiaría la numeración entre
+   * visitas. La numeración se apoya en la posición dentro de la lista
+   * completa —guardados incluidos—, no en un contador aparte.
+   */
+  it("numera desde 1 y no salta aunque haya guardados en medio", () => {
+    const acepciones = [
+      { ...acepcion, id: 1, gloss: "A financial institution.", yaGuardada: false },
+      { ...acepcion, id: 2, gloss: "An edge of a river.", yaGuardada: true },
+      { ...acepcion, id: 3, gloss: "A row of objects.", yaGuardada: false },
+    ];
+
+    expect(significadosNumerados(acepciones).map((s) => s.numero)).toEqual([1, 2, 3]);
+  });
+
+  it("un significado ya guardado conserva su número en su sitio y sale como no elegible", () => {
+    const acepciones = [
+      { ...acepcion, id: 1, gloss: "A financial institution.", yaGuardada: false },
+      { ...acepcion, id: 2, gloss: "An edge of a river.", yaGuardada: true },
+    ];
+
+    const numerados = significadosNumerados(acepciones);
+    expect(numerados[1].numero).toBe(2);
+    expect(numerados[1].elegible).toBe(false);
+    expect(numerados[0].elegible).toBe(true);
+  });
+});
+
+describe("traduccionMarcada", () => {
+  /**
+   * La misma regla que antes vivía por duplicado en el JSX (qué radio se
+   * pinta marcado) y en el cálculo de qué se guarda. Que sea una sola
+   * función evita que puedan separarse sin querer, que es exactamente el
+   * fallo que arregló 477e90c: una traducción guardada sin ningún radio
+   * marcado.
+   */
+  it("una opción está marcada si coincide con la elegida y no hay nada escrito a mano", () => {
+    expect(traduccionMarcada("orilla", "orilla", "")).toBe(true);
+  });
+
+  it("otra opción no está marcada aunque haya una elegida", () => {
+    expect(traduccionMarcada("banco", "orilla", "")).toBe(false);
+  });
+
+  it("escribir algo a mano desmarca cualquier opción de la lista, aunque coincida", () => {
+    expect(traduccionMarcada("orilla", "orilla", "ribera")).toBe(false);
+  });
+
+  it("un manual que solo tiene espacios no cuenta como escrito: la opción elegida sigue marcada", () => {
+    expect(traduccionMarcada("orilla", "orilla", "   ")).toBe(true);
   });
 });
 

@@ -1,17 +1,20 @@
 /**
  * Qué español se guarda en el reverso de una tarjeta, y cuándo no hay ninguno.
  *
- * Vive aquí, y no dentro de una pantalla, porque **las dos puertas de entrada a
- * la biblioteca tienen que decidirlo igual**: la del diccionario, palabra a
- * palabra, y la de extraer sin IA, cuarenta de golpe. Estaba escrito solo en
- * `BuscadorDiccionario.tsx` y la pantalla nueva reintrodujo por su cuenta el
- * `join(", ")` que este proyecto ya había desechado. Compartir la escalera es
- * lo que impide que vuelva a pasar.
+ * Nació aquí porque las dos puertas de entrada a la biblioteca tenían que
+ * decidir el español igual: la del diccionario, palabra a palabra, y la de
+ * extraer sin IA, cuarenta de golpe. Desde que el diccionario dejó de
+ * calcular la traducción y pasó a que el usuario la elija de una lista
+ * (`components/BuscadorDiccionario.tsx`, con `traduccionesPosibles` y
+ * `conTraduccionesAfinadas`), esa puerta ya no la usa: hoy el único
+ * consumidor es `components/ExtraerSinIA.tsx`.
  *
- * Está en `lib/` y no importado de una pantalla a la otra a propósito: la
- * aplicación se abre desde el icono del móvil, y arrastrar el módulo de la
- * pantalla del diccionario al paquete de la de extraer sería pagar kilobytes
- * por dos funciones de una línea.
+ * Sigue en `lib/` aunque le quede un solo consumidor: es donde viven el resto
+ * de funciones puras del diccionario que se prueban sin jsdom
+ * (`traducciones-posibles.ts`, `categoria.ts`), y sus pruebas
+ * (`tests/diccionario/traduccion.test.ts`) ya están ahí. Moverla a
+ * `components/ExtraerSinIA.tsx` solo por tener un único consumidor rompería
+ * esa convención sin arreglar nada.
  */
 
 /**

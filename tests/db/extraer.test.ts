@@ -95,6 +95,24 @@ describe("buscarSugerencias", () => {
     await close();
   });
 
+  /**
+   * La condición del filtro es una sola para palabras y expresiones, así que hoy
+   * esto ya funciona. La prueba está para que siga funcionando: sin ella, partir
+   * el filtro en dos ramas y dejar la de expresión pidiendo solo que **haya**
+   * nivel —sin comparar con el suelo— pasaría entera la suite.
+   */
+  it("corta una expresión con nivel por debajo del suelo", async () => {
+    const { db, close } = await createTestDb();
+    await baseConDiccionario(db);
+    await db.insert(dictionaryEntries).values({
+      termNormalized: "of his", term: "of his", pos: "adj", gloss: "Suyo, de él.", example: null,
+    });
+    await cargarNiveles(db, lineasDe("of his,adjective,A1,,,"));
+
+    expect(await buscarSugerencias(db, [candidata("of his")], "C2")).toEqual([]);
+    await close();
+  });
+
   it("corta una palabra suelta sin nivel: es nombre propio o rareza", async () => {
     const { db, close } = await createTestDb();
     await baseConDiccionario(db);
