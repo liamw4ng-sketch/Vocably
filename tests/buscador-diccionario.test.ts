@@ -9,6 +9,7 @@ import {
   entradaParaGuardar,
   botonAfinarDeshabilitado,
   conTraduccionesAfinadas,
+  traduccionSeleccionadaTrasAfinar,
 } from "@/components/BuscadorDiccionario";
 
 const acepcion = {
@@ -173,6 +174,7 @@ describe("entradaParaGuardar", () => {
    */
   it("guarda el significado elegido como pista, no otro", () => {
     const e = entradaParaGuardar(acepcion, "orilla", "B2");
+    expect(e.term).toBe("bank");
     expect(e.gloss).toBe("An edge of a river.");
     expect(e.pos).toBe("noun");
     expect(e.example).toBe("They sat on the bank.");
@@ -229,6 +231,42 @@ describe("conTraduccionesAfinadas", () => {
 
   it("sin nada afinado deja la lista como estaba", () => {
     expect(conTraduccionesAfinadas(["banco"], [])).toEqual(["banco"]);
+  });
+
+  /**
+   * `traduccionesPosibles` deduplica también dentro de un mismo grupo: si
+   * `lista` trae dos formas equivalentes, el primer grupo no sobrevive con
+   * `lista.length` elementos. Cortar por esa longitud a ciegas se comería
+   * traducciones afinadas de verdad — aquí, "orilla" es lo único que costó
+   * dinero, y no puede perderse.
+   */
+  it("no se come lo afinado cuando la lista trae dos formas equivalentes", () => {
+    expect(conTraduccionesAfinadas(["banco", "Banco"], ["orilla"])).toEqual([
+      "orilla",
+      "banco",
+      "Banco",
+    ]);
+  });
+});
+
+describe("traduccionSeleccionadaTrasAfinar", () => {
+  /**
+   * El caso que dejaba la pantalla sin ningún radio marcado: si lo que
+   * devuelve la IA ya estaba en la lista salvo por mayúsculas o espacios,
+   * `conTraduccionesAfinadas` conserva la forma vieja, no la de la IA.
+   * Seleccionar la forma de la IA no casaría con ningún `t` de la lista
+   * pintada; hay que seleccionar la que de verdad sobrevive.
+   */
+  it("si lo afinado ya estaba, selecciona la forma que sobrevive, no la que devolvió la IA", () => {
+    expect(traduccionSeleccionadaTrasAfinar(["banco"], ["Banco", "orilla"])).toBe("orilla");
+  });
+
+  it("si lo afinado es genuinamente nuevo, lo selecciona a él", () => {
+    expect(traduccionSeleccionadaTrasAfinar(["banco"], ["ribera"])).toBe("ribera");
+  });
+
+  it("sin nada afinado, selecciona lo primero que ya había", () => {
+    expect(traduccionSeleccionadaTrasAfinar(["banco"], [])).toBe("banco");
   });
 });
 

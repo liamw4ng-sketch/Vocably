@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CEFR_LEVELS } from "@/lib/extraction-schema";
 import { formatearPlazo } from "@/lib/plazo";
+import { agruparPorCategoria } from "@/lib/diccionario/categoria";
 import { traduccionesPosibles } from "@/lib/diccionario/traducciones-posibles";
 import { Boton } from "@/components/ui/Boton";
 import { Campo } from "@/components/ui/Campo";
@@ -183,18 +184,39 @@ export function botonAfinarDeshabilitado(acepcion: Acepcion | null, enCurso: boo
  * usuario eligió, así que es la mejor opción que hay.
  *
  * Lo que ya estaba en `lista` se deja tal cual —ni cambia de forma ni de
- * sitio—: solo se antepone lo afinado que sea genuinamente nuevo. Por eso
- * `lista` va primero en la llamada a `traduccionesPosibles`, que es quien
- * decide qué es nuevo: su primer grupo siempre sobrevive entero y sin
- * cambios, así que todo lo que aparece después de esa frontera es lo nuevo
- * que aporta `afinadas`.
+ * sitio—: solo se antepone lo afinado que sea genuinamente nuevo. La frontera
+ * entre lo que ya estaba y lo nuevo **se calcula, no se supone**:
+ * `traduccionesPosibles` también recorta, descarta vacíos y deduplica
+ * *dentro* de un mismo grupo, así que `lista` puede sobrevivir con menos
+ * elementos de los que trae. Cortar a ciegas en `lista.length` se comería
+ * traducciones afinadas de verdad — `traduccionesPosibles(["banco","Banco"],
+ * ["orilla"])` perdería "orilla", que es lo único que costó dinero.
+ * `yaEstaban` mide cuánto sobrevive de `lista` sola, y esa medida, no
+ * `lista.length`, es la que marca dónde empieza lo nuevo.
  *
  * Reutiliza `traduccionesPosibles` para no repetir la regla de deduplicación:
  * si un día cambia cómo se comparan dos traducciones, cambia en un solo sitio.
  */
 export function conTraduccionesAfinadas(lista: string[], afinadas: string[]): string[] {
-  const nuevas = traduccionesPosibles([lista], [afinadas]).slice(lista.length);
+  const yaEstaban = traduccionesPosibles([lista], []);
+  const nuevas = traduccionesPosibles([lista], [afinadas]).slice(yaEstaban.length);
   return [...nuevas, ...lista];
+}
+
+/**
+ * Qué traducción queda seleccionada tras afinar. **No es `afinadas[0]` a
+ * secas**: lo que devuelve la IA puede coincidir, salvo mayúsculas o
+ * espacios, con una traducción que ya estaba en `lista`, y entonces
+ * `conTraduccionesAfinadas` conserva la forma vieja, no la de la IA —es su
+ * regla de "se enseña la primera forma que apareció". Seleccionar la forma
+ * de la IA en ese caso no casaría con ningún `t` de la lista pintada: la
+ * pantalla se quedaría sin ningún radio marcado y aun así dejaría añadir.
+ *
+ * Por eso se selecciona **la forma que sobrevive en la lista ya fundida**,
+ * no la que llegó de la IA.
+ */
+export function traduccionSeleccionadaTrasAfinar(lista: string[], afinadas: string[]): string {
+  return conTraduccionesAfinadas(lista, afinadas)[0] ?? "";
 }
 
 /**
@@ -300,7 +322,6 @@ export function BuscadorDiccionario() {
     // primer render deshabilitado se pinte: sin esto, dos POST en vuelo a la
     // vez para la misma tarjeta.
     if (guardandoIds.has(acepcionElegida.id)) return;
-    const traduccion = manual.trim() || traduccionElegida;
     setError("");
     setGuardandoIds((previas) => new Set(previas).add(acepcionElegida.id));
     try {
@@ -317,10 +338,13 @@ export function BuscadorDiccionario() {
             }
           : previo,
       );
+      // El nivel no se limpia aquí: la regla de limpieza es para la
+      // búsqueda nueva, no para haber añadido un sentido de la misma
+      // palabra. Limpiarlo obligaría a reelegirlo para cada acepción de
+      // `bank`, que es justo el flujo que esta pantalla existe para permitir.
       setAcepcionElegida(null);
       setTraduccionElegida("");
       setManual("");
-      setNivel("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo añadir.");
     } finally {
@@ -339,10 +363,14 @@ export function BuscadorDiccionario() {
     setAfinandoIds((previas) => new Set(previas).add(acepcionElegida.id));
     try {
       const translations = await afinarConIA(acepcionElegida.id);
-      // Se antepone a lo afinado antes, y la primera queda seleccionada: es
-      // lo único curado para esta acepción concreta, así que es lo mejor.
-      setAfinadas((previas) => [...translations, ...previas]);
-      setTraduccionElegida(translations[0] ?? "");
+      // Se antepone a lo afinado antes, y la forma que sobrevive en la lista
+      // ya fundida queda seleccionada —no la que devolvió la IA a secas—:
+      // si coincide con una traducción que ya estaba, la lista conserva la
+      // forma vieja, y seleccionar la de la IA dejaría la pantalla sin
+      // ningún radio marcado.
+      const siguientesAfinadas = [...translations, ...afinadas];
+      setAfinadas(siguientesAfinadas);
+      setTraduccionElegida(traduccionSeleccionadaTrasAfinar(traduccionesBase, siguientesAfinadas));
       setManual("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo afinar.");
@@ -359,17 +387,24 @@ export function BuscadorDiccionario() {
     ? avisoSinAcepciones(resultado.acepciones.length, resultado.enBiblioteca.length)
     : null;
 
-  // Todas las traducciones al español en una sola lista: las de las
-  // acepciones y las de la palabra, sin repetidos, con lo afinado delante.
-  const traducciones = resultado
-    ? conTraduccionesAfinadas(
-        traduccionesPosibles(
-          resultado.acepciones.map((a) => a.translations),
-          resultado.significados.map((g) => g.meanings),
-        ),
-        afinadas,
+  // La lista sin fundir con lo afinado: la necesita `afinar()` para calcular
+  // qué queda seleccionado con `traduccionSeleccionadaTrasAfinar`, así que se
+  // deja aparte en vez de inlinearla dentro de `traducciones`.
+  const traduccionesBase = resultado
+    ? traduccionesPosibles(
+        resultado.acepciones.map((a) => a.translations),
+        resultado.significados.map((g) => g.meanings),
       )
     : [];
+
+  // Todas las traducciones al español en una sola lista: las de las
+  // acepciones y las de la palabra, sin repetidos, con lo afinado delante.
+  const traducciones = conTraduccionesAfinadas(traduccionesBase, afinadas);
+
+  // Las categorías gramaticales de las acepciones, sin repetir: la cabecera
+  // de la tarjeta pierde el origen de cada traducción (§10 lo acepta), pero
+  // no la categoría.
+  const categorias = resultado ? agruparPorCategoria(resultado.acepciones).map((g) => g.nombre) : [];
 
   // Lo escrito a mano manda sobre lo elegido de la lista: escribir algo es
   // la forma de seleccionarlo.
@@ -443,6 +478,19 @@ export function BuscadorDiccionario() {
       {resultado && resultado.acepciones.length > 0 && (
         <Tarjeta>
           <div className="flex flex-col gap-4">
+            {/* La cabecera: la palabra buscada y las categorías gramaticales
+                de sus acepciones, sin repetir. */}
+            <div className="flex items-baseline justify-between gap-3">
+              <p>
+                <strong className="text-texto">{resultado.termino}</strong>
+              </p>
+              {categorias.length > 0 && (
+                <p style={TEXTO_1} className="text-texto-suave">
+                  {categorias.join(" · ")}
+                </p>
+              )}
+            </div>
+
             {/* Las traducciones: una lista de opciones, y siempre la de escribir otra.
                 El usuario pidió elegir él, así que ninguna viene marcada de entrada. */}
             {traducciones.length === 0 ? (
@@ -490,28 +538,39 @@ export function BuscadorDiccionario() {
               </legend>
               <ol className="flex list-none flex-col gap-3">
                 {resultado.acepciones.map((a, indice) => (
-                  <li key={a.id} className="flex items-start gap-2">
+                  <li key={a.id}>
                     {a.yaGuardada ? (
-                      <span aria-hidden className="w-4" />
+                      // Sin radio que etiquetar: no lleva `label`.
+                      <div className="flex items-start gap-2">
+                        <span aria-hidden className="w-4" />
+                        <div className="flex flex-col gap-1">
+                          <p>
+                            {indice + 1}. {a.gloss}
+                          </p>
+                          {a.example && <p className="italic text-texto-suave">{a.example}</p>}
+                          <p style={TEXTO_1} className="text-texto-suave">
+                            Ya está en tu repaso.
+                          </p>
+                        </div>
+                      </div>
                     ) : (
-                      <input
-                        type="radio"
-                        name="significado"
-                        checked={acepcionElegida?.id === a.id}
-                        onChange={() => setAcepcionElegida(a)}
-                      />
+                      // Dentro de un `<label>`, como el bloque de traducciones: sin él, en
+                      // el móvil solo se acierta en el círculo de ~16px del radio.
+                      <label className="flex items-start gap-2">
+                        <input
+                          type="radio"
+                          name="significado"
+                          checked={acepcionElegida?.id === a.id}
+                          onChange={() => setAcepcionElegida(a)}
+                        />
+                        <div className="flex flex-col gap-1">
+                          <p>
+                            {indice + 1}. {a.gloss}
+                          </p>
+                          {a.example && <p className="italic text-texto-suave">{a.example}</p>}
+                        </div>
+                      </label>
                     )}
-                    <div className="flex flex-col gap-1">
-                      <p>
-                        {indice + 1}. {a.gloss}
-                      </p>
-                      {a.example && <p className="italic text-texto-suave">{a.example}</p>}
-                      {a.yaGuardada && (
-                        <p style={TEXTO_1} className="text-texto-suave">
-                          Ya está en tu repaso.
-                        </p>
-                      )}
-                    </div>
                   </li>
                 ))}
               </ol>
