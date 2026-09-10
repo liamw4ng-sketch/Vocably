@@ -42,4 +42,24 @@ describe("traduccionesPosibles", () => {
     expect(traduccionesPosibles([], [])).toEqual([]);
     expect(traduccionesPosibles([[], []], [[]])).toEqual([]);
   });
+
+  /**
+   * Dos traducciones visualmente idénticas pero en formas Unicode distintas
+   * (una compuesta, otra descompuesta) tienen que deduplicarse.
+   * Este era un problema real en versiones anteriores del proyecto.
+   */
+  it("deduplica traducciones idénticas en formas Unicode distintas", () => {
+    // Escapes explícitos (\uXXXX) para que ningún editor o herramienta pueda
+    // renormalizar en silencio los literales de este fichero.
+    // NFD: "cafe" + acento agudo combinante U+0301 (forma descompuesta, 5 code units).
+    const nfd = "cafe" + String.fromCharCode(0x0301);
+    // NFC: "e" acentuada precompuesta U+00E9 (forma compuesta, 4 code units).
+    const nfc = "caf" + String.fromCharCode(0x00e9);
+
+    // Comprueba que las dos formas son secuencias de code units distintas.
+    expect(nfd).not.toBe(nfc);
+
+    // La lista debe tener solo una entrada: la forma que apareció primero.
+    expect(traduccionesPosibles([[nfd], [nfc]], [])).toEqual([nfd]);
+  });
 });

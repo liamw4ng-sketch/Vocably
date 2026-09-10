@@ -1,3 +1,5 @@
+import { normalizeTerm } from "@/lib/normalize";
+
 /**
  * Todas las traducciones al español que se le pueden ofrecer a una palabra, en
  * una sola lista y sin repetidos.
@@ -12,9 +14,12 @@
  * enteras del Wikcionario español, con su punto final. Lo más parecido a una
  * traducción, arriba.
  *
- * La comparación ignora mayúsculas y espacios de sobra para no ofrecer `Banco.`
- * y `banco` como dos opciones distintas, pero **se conserva la primera forma que
- * apareció**: es la que se enseña y la que acaba en la tarjeta.
+ * La comparación reutiliza el helper `normalizeTerm`, que es la regla compartida
+ * de "clave de comparación de términos" en todo el proyecto. Normaliza según
+ * Unicode NFC, ignora mayúsculas y espacios de sobra, para no ofrecer `Banco.`
+ * y `banco` como dos opciones distintas, ni `café` en formas distintas (NFD vs
+ * NFC). Pero **se conserva la primera forma que apareció**: es la que se enseña
+ * y la que acaba en la tarjeta.
  */
 export function traduccionesPosibles(
   deLasAcepciones: string[][],
@@ -27,7 +32,7 @@ export function traduccionesPosibles(
     for (const cruda of grupo) {
       const traduccion = cruda.trim();
       if (!traduccion) continue;
-      const clave = traduccion.toLowerCase().replace(/\s+/g, " ");
+      const clave = normalizeTerm(traduccion);
       if (vistas.has(clave)) continue;
       vistas.add(clave);
       lista.push(traduccion);
