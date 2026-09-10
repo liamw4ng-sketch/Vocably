@@ -219,6 +219,47 @@ export function traduccionSeleccionadaTrasAfinar(lista: string[], afinadas: stri
   return conTraduccionesAfinadas(lista, afinadas)[0] ?? "";
 }
 
+/** Un significado ya numerado para pintar en el `<ol>`, con si se puede elegir. */
+export type SignificadoNumerado = {
+  numero: number;
+  acepcion: Acepcion;
+  elegible: boolean;
+};
+
+/**
+ * Numera los significados desde 1, en el orden en que llegan —guardados
+ * incluidos—, y dice cuáles se pueden elegir.
+ *
+ * Esconder los ya guardados cambiaría la numeración entre visitas y haría
+ * imposible referirse a «el tercero» (§7), así que se numeran en su sitio y
+ * salen como no elegibles, no se quitan de la lista.
+ */
+export function significadosNumerados(acepciones: Acepcion[]): SignificadoNumerado[] {
+  return acepciones.map((acepcion, indice) => ({
+    numero: indice + 1,
+    acepcion,
+    elegible: !acepcion.yaGuardada,
+  }));
+}
+
+/**
+ * Si esta opción de la lista de traducciones es la que está marcada ahora
+ * mismo. Escribir algo a mano manda sobre lo elegido de la lista —es la
+ * forma de seleccionarlo—, así que mientras haya algo escrito ninguna
+ * opción de la lista está marcada, aunque su texto coincida por casualidad
+ * con lo escrito a mano. Un manual que solo tiene espacios no cuenta como
+ * escrito.
+ *
+ * Sirve a los dos sitios que antes calculaban esto por separado y en
+ * paralelo —qué radio se pinta marcado, y qué traducción viaja al
+ * guardar—: que sea la misma función evita que puedan separarse sin
+ * querer, que es exactamente el fallo que arregló 477e90c (una traducción
+ * guardada sin que ningún radio estuviera marcado).
+ */
+export function traduccionMarcada(opcion: string, elegida: string, manual: string): boolean {
+  return !manual.trim() && opcion === elegida;
+}
+
 /**
  * Cuándo vuelve a tocar una palabra que ya está en el repaso, con el mismo
  * castellano que los botones de la sesión: se reutiliza `formatearPlazo` en
@@ -293,6 +334,19 @@ export function BuscadorDiccionario() {
   // petición en vuelo se sigue mirando por el id de la acepción concreta.
   const [guardandoIds, setGuardandoIds] = useState<Set<number>>(new Set());
   const [afinandoIds, setAfinandoIds] = useState<Set<number>>(new Set());
+
+  // La lista sin fundir con lo afinado: la necesita `afinar()` para calcular
+  // qué queda seleccionado con `traduccionSeleccionadaTrasAfinar`. Declarada
+  // aquí arriba, antes de `afinar()`, no donde se usa por última vez: si
+  // este cálculo se metiera algún día en un `useMemo`, depender de un
+  // `const` declarado más abajo en el cuerpo del componente rompería en
+  // silencio por orden de evaluación.
+  const traduccionesBase = resultado
+    ? traduccionesPosibles(
+        resultado.acepciones.map((a) => a.translations),
+        resultado.significados.map((g) => g.meanings),
+      )
+    : [];
 
   async function buscar(evento: React.FormEvent) {
     evento.preventDefault();
@@ -387,16 +441,6 @@ export function BuscadorDiccionario() {
     ? avisoSinAcepciones(resultado.acepciones.length, resultado.enBiblioteca.length)
     : null;
 
-  // La lista sin fundir con lo afinado: la necesita `afinar()` para calcular
-  // qué queda seleccionado con `traduccionSeleccionadaTrasAfinar`, así que se
-  // deja aparte en vez de inlinearla dentro de `traducciones`.
-  const traduccionesBase = resultado
-    ? traduccionesPosibles(
-        resultado.acepciones.map((a) => a.translations),
-        resultado.significados.map((g) => g.meanings),
-      )
-    : [];
-
   // Todas las traducciones al español en una sola lista: las de las
   // acepciones y las de la palabra, sin repetidos, con lo afinado delante.
   const traducciones = conTraduccionesAfinadas(traduccionesBase, afinadas);
@@ -406,9 +450,26 @@ export function BuscadorDiccionario() {
   // no la categoría.
   const categorias = resultado ? agruparPorCategoria(resultado.acepciones).map((g) => g.nombre) : [];
 
-  // Lo escrito a mano manda sobre lo elegido de la lista: escribir algo es
-  // la forma de seleccionarlo.
-  const traduccion = manual.trim() || traduccionElegida;
+  // La forma que trae el diccionario, no la que escribió el usuario:
+  // `buscarEnDiccionario` busca por variantes del lema, así que pueden no
+  // coincidir ("bite off more than you can chew" buscado, pero el
+  // diccionario guarda "bite off more than one can chew"; "Bank" buscado,
+  // "bank" guardado). Todas las acepciones comparten el mismo `term`, porque
+  // vienen de una sola búsqueda por un único `termNormalized`.
+  const terminoDelDiccionario =
+    resultado && resultado.acepciones.length > 0 ? resultado.acepciones[0].term : "";
+
+  // Lo que se guarda es la misma traducción que se ve marcada en la lista, o
+  // lo escrito a mano si hay algo: `traduccionMarcada` decide las dos cosas
+  // con la misma regla, así que no pueden desalinearse.
+  const opcionMarcada = traducciones.find((t) => traduccionMarcada(t, traduccionElegida, manual));
+  const traduccion = manual.trim() || opcionMarcada || "";
+
+  // Si hay una petición en vuelo para la acepción elegida: cada una hace
+  // falta dos veces (deshabilitar su botón, cambiar su texto), así que se
+  // calcula una sola vez.
+  const afinandoEstaAcepcion = acepcionElegida ? afinandoIds.has(acepcionElegida.id) : false;
+  const guardandoEstaAcepcion = acepcionElegida ? guardandoIds.has(acepcionElegida.id) : false;
 
   return (
     <div className="flex flex-col gap-6">
@@ -478,11 +539,13 @@ export function BuscadorDiccionario() {
       {resultado && resultado.acepciones.length > 0 && (
         <Tarjeta>
           <div className="flex flex-col gap-4">
-            {/* La cabecera: la palabra buscada y las categorías gramaticales
-                de sus acepciones, sin repetir. */}
+            {/* La cabecera: la forma que trae el diccionario —no la que
+                escribió el usuario, que puede ser otra variante del lema o
+                venir en otras mayúsculas— y las categorías gramaticales de
+                sus acepciones, sin repetir. */}
             <div className="flex items-baseline justify-between gap-3">
               <p>
-                <strong className="text-texto">{resultado.termino}</strong>
+                <strong className="text-texto">{terminoDelDiccionario}</strong>
               </p>
               {categorias.length > 0 && (
                 <p style={TEXTO_1} className="text-texto-suave">
@@ -505,7 +568,7 @@ export function BuscadorDiccionario() {
                     <input
                       type="radio"
                       name="traduccion"
-                      checked={traduccionElegida === t && !manual.trim()}
+                      checked={traduccionMarcada(t, traduccionElegida, manual)}
                       onChange={() => {
                         setTraduccionElegida(t);
                         setManual("");
@@ -537,64 +600,48 @@ export function BuscadorDiccionario() {
                 Significados
               </legend>
               <ol className="flex list-none flex-col gap-3">
-                {resultado.acepciones.map((a, indice) => (
-                  <li key={a.id}>
-                    {a.yaGuardada ? (
-                      // Sin radio que etiquetar: no lleva `label`.
-                      <div className="flex items-start gap-2">
-                        <span aria-hidden className="w-4" />
-                        <div className="flex flex-col gap-1">
-                          <p>
-                            {indice + 1}. {a.gloss}
-                          </p>
-                          {a.example && <p className="italic text-texto-suave">{a.example}</p>}
-                          <p style={TEXTO_1} className="text-texto-suave">
-                            Ya está en tu repaso.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
+                {significadosNumerados(resultado.acepciones).map((s) => (
+                  <li key={s.acepcion.id}>
+                    {s.elegible ? (
                       // Dentro de un `<label>`, como el bloque de traducciones: sin él, en
                       // el móvil solo se acierta en el círculo de ~16px del radio.
                       <label className="flex items-start gap-2">
                         <input
                           type="radio"
                           name="significado"
-                          checked={acepcionElegida?.id === a.id}
-                          onChange={() => setAcepcionElegida(a)}
+                          checked={acepcionElegida?.id === s.acepcion.id}
+                          onChange={() => setAcepcionElegida(s.acepcion)}
                         />
                         <div className="flex flex-col gap-1">
                           <p>
-                            {indice + 1}. {a.gloss}
+                            {s.numero}. {s.acepcion.gloss}
                           </p>
-                          {a.example && <p className="italic text-texto-suave">{a.example}</p>}
+                          {s.acepcion.example && (
+                            <p className="italic text-texto-suave">{s.acepcion.example}</p>
+                          )}
                         </div>
                       </label>
+                    ) : (
+                      // Sin radio que etiquetar: no lleva `label`.
+                      <div className="flex items-start gap-2">
+                        <span aria-hidden className="w-4" />
+                        <div className="flex flex-col gap-1">
+                          <p>
+                            {s.numero}. {s.acepcion.gloss}
+                          </p>
+                          {s.acepcion.example && (
+                            <p className="italic text-texto-suave">{s.acepcion.example}</p>
+                          )}
+                          <p style={TEXTO_1} className="text-texto-suave">
+                            Ya está en tu repaso.
+                          </p>
+                        </div>
+                      </div>
                     )}
                   </li>
                 ))}
               </ol>
             </fieldset>
-
-            {/* Afinar solo mira el significado elegido: es la traducción curada de
-                esa acepción concreta, y el único punto de pago de la pantalla. */}
-            <div className="flex flex-col items-start gap-1">
-              <Boton
-                variante="secundario"
-                onClick={afinar}
-                disabled={botonAfinarDeshabilitado(
-                  acepcionElegida,
-                  acepcionElegida ? afinandoIds.has(acepcionElegida.id) : false,
-                )}
-              >
-                {acepcionElegida && afinandoIds.has(acepcionElegida.id)
-                  ? "Afinando…"
-                  : "Afinar con IA"}
-              </Boton>
-              <p style={TEXTO_1} className="text-texto-suave">
-                Afinar cuesta unos céntimos. Todo lo demás de esta pantalla es gratis.
-              </p>
-            </div>
 
             <div className="flex items-end gap-3">
               <Campo
@@ -613,13 +660,27 @@ export function BuscadorDiccionario() {
                   acepcionElegida,
                   traduccion,
                   nivel,
-                  acepcionElegida ? guardandoIds.has(acepcionElegida.id) : false,
+                  guardandoEstaAcepcion,
                 )}
               >
-                {acepcionElegida && guardandoIds.has(acepcionElegida.id)
-                  ? "Añadiendo…"
-                  : "Añadir"}
+                {guardandoEstaAcepcion ? "Añadiendo…" : "Añadir"}
               </Boton>
+            </div>
+
+            {/* Afinar con IA va el último, debajo de Nivel/Añadir (§4): solo mira
+                el significado elegido —es la traducción curada de esa acepción
+                concreta— y es el único punto de pago de la pantalla. */}
+            <div className="flex flex-col items-start gap-1">
+              <Boton
+                variante="secundario"
+                onClick={afinar}
+                disabled={botonAfinarDeshabilitado(acepcionElegida, afinandoEstaAcepcion)}
+              >
+                {afinandoEstaAcepcion ? "Afinando…" : "Afinar con IA"}
+              </Boton>
+              <p style={TEXTO_1} className="text-texto-suave">
+                Afinar cuesta unos céntimos. Todo lo demás de esta pantalla es gratis.
+              </p>
             </div>
           </div>
         </Tarjeta>

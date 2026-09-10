@@ -10,6 +10,8 @@ import {
   botonAfinarDeshabilitado,
   conTraduccionesAfinadas,
   traduccionSeleccionadaTrasAfinar,
+  significadosNumerados,
+  traduccionMarcada,
 } from "@/components/BuscadorDiccionario";
 
 const acepcion = {
@@ -282,6 +284,60 @@ describe("botonAfinarDeshabilitado", () => {
 
   it("con la petición en vuelo, deshabilitado", () => {
     expect(botonAfinarDeshabilitado(acepcion, true)).toBe(true);
+  });
+});
+
+describe("significadosNumerados", () => {
+  /**
+   * §7: esconder un significado ya guardado cambiaría la numeración entre
+   * visitas. La numeración se apoya en la posición dentro de la lista
+   * completa —guardados incluidos—, no en un contador aparte.
+   */
+  it("numera desde 1 y no salta aunque haya guardados en medio", () => {
+    const acepciones = [
+      { ...acepcion, id: 1, gloss: "A financial institution.", yaGuardada: false },
+      { ...acepcion, id: 2, gloss: "An edge of a river.", yaGuardada: true },
+      { ...acepcion, id: 3, gloss: "A row of objects.", yaGuardada: false },
+    ];
+
+    expect(significadosNumerados(acepciones).map((s) => s.numero)).toEqual([1, 2, 3]);
+  });
+
+  it("un significado ya guardado conserva su número en su sitio y sale como no elegible", () => {
+    const acepciones = [
+      { ...acepcion, id: 1, gloss: "A financial institution.", yaGuardada: false },
+      { ...acepcion, id: 2, gloss: "An edge of a river.", yaGuardada: true },
+    ];
+
+    const numerados = significadosNumerados(acepciones);
+    expect(numerados[1].numero).toBe(2);
+    expect(numerados[1].elegible).toBe(false);
+    expect(numerados[0].elegible).toBe(true);
+  });
+});
+
+describe("traduccionMarcada", () => {
+  /**
+   * La misma regla que antes vivía por duplicado en el JSX (qué radio se
+   * pinta marcado) y en el cálculo de qué se guarda. Que sea una sola
+   * función evita que puedan separarse sin querer, que es exactamente el
+   * fallo que arregló 477e90c: una traducción guardada sin ningún radio
+   * marcado.
+   */
+  it("una opción está marcada si coincide con la elegida y no hay nada escrito a mano", () => {
+    expect(traduccionMarcada("orilla", "orilla", "")).toBe(true);
+  });
+
+  it("otra opción no está marcada aunque haya una elegida", () => {
+    expect(traduccionMarcada("banco", "orilla", "")).toBe(false);
+  });
+
+  it("escribir algo a mano desmarca cualquier opción de la lista, aunque coincida", () => {
+    expect(traduccionMarcada("orilla", "orilla", "ribera")).toBe(false);
+  });
+
+  it("un manual que solo tiene espacios no cuenta como escrito: la opción elegida sigue marcada", () => {
+    expect(traduccionMarcada("orilla", "orilla", "   ")).toBe(true);
   });
 });
 
